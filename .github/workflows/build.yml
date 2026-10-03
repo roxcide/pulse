@@ -31,3 +31,7 @@ jobs:
         run: pnpm run format:check
       - name: Build production site
         run: pnpm run build
+      - name: Validate Workers deployment without publishing
+        run: pnpm run deploy:check
+        env:
+          WRANGLER_SEND_METRICS: "false"

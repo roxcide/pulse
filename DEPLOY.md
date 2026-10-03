@@ -1,15 +1,50 @@
-# Публикация PULSE: GitHub → Cloudflare Pages
+# Публикация PULSE: GitHub → Cloudflare
 
 Рекомендуемый путь: загрузить исходники в GitHub и подключить репозиторий к **Cloudflare Pages**. Cloudflare будет собирать и публиковать сайт после обновлений ветки `main`.
 
+## Если проект уже создан как Cloudflare Worker
+
+Если в журнале запускается `wrangler deploy`, используй подготовленную конфигурацию Workers. Пересоздавать проект для исправления ошибки `ERR_PNPM_IGNORED_BUILDS` не нужно.
+
+В обновлённой версии:
+
+- `pnpm-workspace.yaml` явно разрешает установочные скрипты `esbuild` и `workerd`.
+- Wrangler `4.147.0` зафиксирован в `package.json` и `pnpm-lock.yaml`.
+- `wrangler.jsonc` задаёт публикацию папки `dist` с обработкой SPA. Автоматическая перенастройка React-приложения Wrangler больше не требуется.
+- `pnpm run deploy:check` проверяет конфигурацию без публикации и без входа в аккаунт.
+
+Загрузи обновлённые файлы из `release/github-upload-fixed/` в корень GitHub-репозитория и задай в настройках сборки **Workers**:
+
+| Поле           | Значение                                         |
+| -------------- | ------------------------------------------------ |
+| Build command  | `pnpm run build`                                 |
+| Deploy command | `pnpm run deploy`                                |
+| Root directory | Корень репозитория, где находится `package.json` |
+| `NODE_VERSION` | `24.19.0`                                        |
+| `PNPM_VERSION` | `11.25.0`                                        |
+
+Имя в `wrangler.jsonc` сейчас `pulse`: оно должно совпадать с именем Worker в Cloudflare. Если Worker называется иначе, измени поле `name` на его фактическое имя. Затем запусти повторную сборку последнего коммита. Для Workers статические файлы уже указаны в `assets.directory`; отдельное поле Build output directory не требуется.
+
+Для этой ошибки важна строка `workerd: true`. Строка `Lockfile passes supply-chain policies` — успешная проверка, а не причина сбоя. Интерактивный `pnpm approve-builds` на Cloudflare запускать не нужно: разрешение записано в репозитории.
+
+Для локальной проверки:
+
+```sh
+pnpm install --frozen-lockfile
+pnpm run build
+pnpm run deploy:check
+```
+
+Команда `pnpm run deploy` выполняет реальную публикацию в Workers и предполагает, что `dist` уже собран. Для Pages используются настройки ниже; отдельная команда deploy там не нужна.
+
 ## 1. Что куда загружать
 
-| Артефакт                       | Назначение                                                              |
-| ------------------------------ | ----------------------------------------------------------------------- |
-| `release/github-upload/`       | Чистая папка исходников для загрузки в корень GitHub-репозитория        |
-| `release/pulse-github.zip`     | Те же исходники в архиве; перед загрузкой на GitHub распаковать         |
-| `release/pulse-cloudflare.zip` | Готовый сайт для Cloudflare Pages → Direct Upload                       |
-| `dist/`                        | Результат локальной сборки; содержимое также подходит для Direct Upload |
+| Артефакт                         | Назначение                                                              |
+| -------------------------------- | ----------------------------------------------------------------------- |
+| `release/github-upload-fixed/`   | Чистая папка исходников для загрузки в корень GitHub-репозитория        |
+| `release/pulse-github-fixed.zip` | Те же исходники в архиве; перед загрузкой на GitHub распаковать         |
+| `release/pulse-cloudflare.zip`   | Готовый сайт для Cloudflare Pages → Direct Upload                       |
+| `dist/`                          | Результат локальной сборки; содержимое также подходит для Direct Upload |
 
 Архивы в `release/` — снимок подготовленной версии. После изменения кода заново собери `dist` и обнови архивы. Они намеренно исключены из Git вместе с `node_modules`, скриншотами и локальными файлами окружения.
 
@@ -17,7 +52,7 @@
 
 1. Открой свой репозиторий `ep1aga/pulse`.
 2. Выбери **Add file → Upload files**; в пустом репозитории — **uploading an existing file**.
-3. Открой `release/github-upload/` или распакуй `pulse-github.zip`.
+3. Открой `release/github-upload-fixed/` или распакуй `pulse-github-fixed.zip`.
 4. Перетащи **содержимое** этой папки в GitHub. `package.json`, `index.html`, `src/` и `public/` должны оказаться в корне репозитория, без дополнительной папки `pulse` или `github-upload`.
 5. Проверь, что загружены также `.github/workflows/build.yml`, `.node-version`, `.gitignore`, `.gitattributes`, `pnpm-lock.yaml` и `pnpm-workspace.yaml`. При необходимости включи показ скрытых файлов в проводнике.
 6. Нажми **Commit changes**, выбрав ветку `main`.
@@ -36,7 +71,7 @@ git push -u origin main
 
 ## 3. Подключение Cloudflare Pages к GitHub
 
-В Cloudflare открой **Workers & Pages**, создай приложение **Pages** с подключением Git-репозитория и выбери `ep1aga/pulse`. Используй именно Pages: файл Worker и команда `wrangler deploy` для этого приложения не нужны.
+В Cloudflare открой **Workers & Pages**, создай приложение **Pages** с подключением Git-репозитория и выбери `ep1aga/pulse`. Для этого варианта команда `wrangler deploy` не нужна. Если приложение уже создано как Worker, смотри первый раздел инструкции.
 
 Параметры сборки:
 
@@ -60,7 +95,7 @@ Cloudflare автоматически установит зависимости.
 
 - `pnpm-lock.yaml` фиксирует версии библиотек.
 - `packageManager`, `.node-version` и инструкции задают версии инструментов.
-- `pnpm-workspace.yaml` разрешает необходимый шаг установки `esbuild`.
+- `pnpm-workspace.yaml` разрешает необходимые шаги установки `esbuild` и `workerd`.
 - `public/_headers` копируется в `dist`: заголовки типов содержимого и referrer policy, долгое кеширование файлов с хешами в `/assets/`.
 - Навигация использует `#dashboard`, `#workout`, `#calendar` и другие hash-маршруты: обновление страницы не требует серверного роутера.
 - В корне сборки нет `404.html`, поэтому сохраняется стандартная поддержка SPA в Pages.
@@ -99,3 +134,6 @@ pnpm run preview
 - [Direct Upload и его ограничения](https://developers.cloudflare.com/pages/get-started/direct-upload/)
 - [Заголовки Pages](https://developers.cloudflare.com/pages/configuration/headers/)
 - [Загрузка файлов в GitHub](https://docs.github.com/en/repositories/working-with-files/managing-files/adding-a-file-to-a-repository)
+- [Разрешения установочных скриптов pnpm](https://pnpm.io/settings/build#allowbuilds)
+- [Автоконфигурация Wrangler](https://developers.cloudflare.com/workers/framework-guides/automatic-configuration/)
+- [Параметры сборки Workers](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/)

@@ -11,9 +11,11 @@
   "scripts": {
     "dev": "vite --host 0.0.0.0",
     "build": "vite build",
+    "deploy": "wrangler deploy",
+    "deploy:check": "wrangler deploy --dry-run",
     "preview": "vite preview --host 0.0.0.0",
-    "format": "prettier --write src index.html README.md DEPLOY.md package.json .github/workflows/build.yml",
-    "format:check": "prettier --check src index.html README.md DEPLOY.md package.json .github/workflows/build.yml"
+    "format": "prettier --write src index.html DEPLOY.md package.json pnpm-workspace.yaml wrangler.jsonc .github/workflows/build.yml",
+    "format:check": "prettier --check src index.html DEPLOY.md package.json pnpm-workspace.yaml wrangler.jsonc .github/workflows/build.yml"
   },
   "dependencies": {
     "lucide-react": "^0.468.0",
@@ -22,6 +24,7 @@
   },
   "devDependencies": {
     "prettier": "^3.9.9",
-    "vite": "^7.0.0"
+    "vite": "^7.0.0",
+    "wrangler": "4.147.0"
   }
 }
