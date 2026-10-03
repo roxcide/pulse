@@ -1,0 +1,27 @@
+{
+  "name": "pulse-fitness",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "PULSE — адаптивный фитнес-трекер на React и Vite",
+  "packageManager": "pnpm@11.25.0",
+  "engines": {
+    "node": ">=24.19.0 <25"
+  },
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0",
+    "format": "prettier --write src index.html README.md DEPLOY.md package.json .github/workflows/build.yml",
+    "format:check": "prettier --check src index.html README.md DEPLOY.md package.json .github/workflows/build.yml"
+  },
+  "dependencies": {
+    "lucide-react": "^0.468.0",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "prettier": "^3.9.9",
+    "vite": "^7.0.0"
+  }
+}
