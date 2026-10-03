@@ -11,13 +11,14 @@
 - `pnpm-workspace.yaml` явно разрешает установочные скрипты `esbuild` и `workerd`.
 - Wrangler `4.147.0` зафиксирован в `package.json` и `pnpm-lock.yaml`.
 - `wrangler.jsonc` задаёт публикацию папки `dist` с обработкой SPA. Автоматическая перенастройка React-приложения Wrangler больше не требуется.
-- `pnpm run deploy:check` проверяет конфигурацию без публикации и без входа в аккаунт.
+- `build.command` в `wrangler.jsonc` запускает Vite перед деплоем: папка `dist` создаётся автоматически, даже если отдельный Build command в Cloudflare не задан.
+- `pnpm run deploy:check` выполняет эту же сборку и проверяет конфигурацию без публикации и без входа в аккаунт.
 
-Загрузи обновлённые файлы из `release/github-upload-fixed/` в корень GitHub-репозитория и задай в настройках сборки **Workers**:
+Загрузи обновлённые файлы из `release/github-upload-v3/` в корень GitHub-репозитория и задай в настройках сборки **Workers**:
 
 | Поле           | Значение                                         |
 | -------------- | ------------------------------------------------ |
-| Build command  | `pnpm run build`                                 |
+| Build command  | Можно оставить пустым: сборку запускает Wrangler |
 | Deploy command | `pnpm run deploy`                                |
 | Root directory | Корень репозитория, где находится `package.json` |
 | `NODE_VERSION` | `24.19.0`                                        |
@@ -31,20 +32,19 @@
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm run build
 pnpm run deploy:check
 ```
 
-Команда `pnpm run deploy` выполняет реальную публикацию в Workers и предполагает, что `dist` уже собран. Для Pages используются настройки ниже; отдельная команда deploy там не нужна.
+Команда `pnpm run deploy` сначала автоматически собирает `dist` через `build.command`, затем выполняет реальную публикацию в Workers. Прямой вызов `npx wrangler deploy` также выполняет эту сборку. Для Pages используются настройки ниже; отдельная команда deploy там не нужна.
 
 ## 1. Что куда загружать
 
-| Артефакт                         | Назначение                                                              |
-| -------------------------------- | ----------------------------------------------------------------------- |
-| `release/github-upload-fixed/`   | Чистая папка исходников для загрузки в корень GitHub-репозитория        |
-| `release/pulse-github-fixed.zip` | Те же исходники в архиве; перед загрузкой на GitHub распаковать         |
-| `release/pulse-cloudflare.zip`   | Готовый сайт для Cloudflare Pages → Direct Upload                       |
-| `dist/`                          | Результат локальной сборки; содержимое также подходит для Direct Upload |
+| Артефакт                       | Назначение                                                              |
+| ------------------------------ | ----------------------------------------------------------------------- |
+| `release/github-upload-fixed/` | Чистая папка исходников для загрузки в корень GitHub-репозитория        |
+| `release/pulse-github-v3.zip`  | Те же исходники в архиве; перед загрузкой на GitHub распаковать         |
+| `release/pulse-cloudflare.zip` | Готовый сайт для Cloudflare Pages → Direct Upload                       |
+| `dist/`                        | Результат локальной сборки; содержимое также подходит для Direct Upload |
 
 Архивы в `release/` — снимок подготовленной версии. После изменения кода заново собери `dist` и обнови архивы. Они намеренно исключены из Git вместе с `node_modules`, скриншотами и локальными файлами окружения.
 
@@ -137,3 +137,5 @@ pnpm run preview
 - [Разрешения установочных скриптов pnpm](https://pnpm.io/settings/build#allowbuilds)
 - [Автоконфигурация Wrangler](https://developers.cloudflare.com/workers/framework-guides/automatic-configuration/)
 - [Параметры сборки Workers](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/)
+
+- [Сборка перед публикацией Wrangler](https://developers.cloudflare.com/workers/wrangler/custom-builds/)

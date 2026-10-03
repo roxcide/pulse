@@ -29,9 +29,7 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Check formatting
         run: pnpm run format:check
-      - name: Build production site
-        run: pnpm run build
-      - name: Validate Workers deployment without publishing
+      - name: Build and validate Workers deployment from a clean checkout
         run: pnpm run deploy:check
         env:
           WRANGLER_SEND_METRICS: "false"

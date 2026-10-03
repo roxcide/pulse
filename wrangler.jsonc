@@ -2,6 +2,9 @@
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "pulse",
   "compatibility_date": "2026-10-01",
+  "build": {
+    "command": "node ./node_modules/vite/bin/vite.js build",
+  },
   "assets": {
     "directory": "./dist",
     "not_found_handling": "single-page-application",
