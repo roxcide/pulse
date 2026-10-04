@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { api, authError } from "./client";
 import { useAuth } from "./AuthProvider";
+import { ThemePicker } from "../theme";
 
 function ProviderIcon() {
   return (
@@ -283,6 +284,10 @@ export default function AuthScreen({ initialError = "" }) {
             <LockKeyhole size={13} />
             Твои тренировки доступны только тебе.
           </p>
+          <details className="auth-appearance">
+            <summary>Выбрать тему оформления</summary>
+            <ThemePicker />
+          </details>
         </div>
         <footer className="auth-footer">
           PULSE © {new Date().getFullYear()}

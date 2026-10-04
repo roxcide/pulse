@@ -31,6 +31,7 @@ import {
   CheckCheck,
 } from "lucide-react";
 import { useAuth } from "./auth/AuthProvider";
+import { ThemePicker } from "./theme";
 import { useUserData } from "./state/UserDataProvider";
 import { useStoredState } from "./hooks";
 import {
@@ -1443,64 +1444,67 @@ export default function App() {
           onClose={closeModal}
         >
           {modal.type === "settings" && (
-            <form
-              onSubmit={(e) => {
-                e.preventDefault();
-                const data = new FormData(e.currentTarget);
-                setProfile({
-                  name: data.get("name").trim() || "Атлет",
-                  goal: Number(data.get("goal")),
-                  rest: Number(data.get("rest")),
-                });
-                setModal(null);
-                notify("Настройки сохранены");
-              }}
-            >
-              <label className="form-field">
-                Как тебя зовут
-                <input
-                  name="name"
-                  defaultValue={profile.name}
-                  maxLength="24"
-                  required
-                />
-              </label>
-              <label className="form-field">
-                Цель: тренировочных дней в неделю
-                <select name="goal" defaultValue={profile.goal}>
-                  <option value={0}>Не задана</option>
-                  {[1, 2, 3, 4, 5, 6, 7].map((n) => (
-                    <option key={n} value={n}>
-                      {n}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label className="form-field">
-                Отдых между подходами
-                <select name="rest" defaultValue={profile.rest}>
-                  {[30, 60, 90, 120, 180].map((n) => (
-                    <option key={n} value={n}>
-                      {n} секунд
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <p className="form-hint">
-                Аккаунт: {user.email}. Тренировки сохраняются в твоём профиле.
-              </p>
-              <button className="primary-button full-width" type="submit">
-                Сохранить настройки
-                <Check size={17} />
-              </button>
-              <button
-                type="button"
-                className="text-button settings-clean"
-                onClick={signOut}
+            <>
+              <ThemePicker />
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const data = new FormData(e.currentTarget);
+                  setProfile({
+                    name: data.get("name").trim() || "Атлет",
+                    goal: Number(data.get("goal")),
+                    rest: Number(data.get("rest")),
+                  });
+                  setModal(null);
+                  notify("Настройки сохранены");
+                }}
               >
-                Выйти из аккаунта
-              </button>
-            </form>
+                <label className="form-field">
+                  Как тебя зовут
+                  <input
+                    name="name"
+                    defaultValue={profile.name}
+                    maxLength="24"
+                    required
+                  />
+                </label>
+                <label className="form-field">
+                  Цель: тренировочных дней в неделю
+                  <select name="goal" defaultValue={profile.goal}>
+                    <option value={0}>Не задана</option>
+                    {[1, 2, 3, 4, 5, 6, 7].map((n) => (
+                      <option key={n} value={n}>
+                        {n}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="form-field">
+                  Отдых между подходами
+                  <select name="rest" defaultValue={profile.rest}>
+                    {[30, 60, 90, 120, 180].map((n) => (
+                      <option key={n} value={n}>
+                        {n} секунд
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <p className="form-hint">
+                  Аккаунт: {user.email}. Тренировки сохраняются в твоём профиле.
+                </p>
+                <button className="primary-button full-width" type="submit">
+                  Сохранить настройки
+                  <Check size={17} />
+                </button>
+                <button
+                  type="button"
+                  className="text-button settings-clean"
+                  onClick={signOut}
+                >
+                  Выйти из аккаунта
+                </button>
+              </form>
+            </>
           )}
           {modal.type === "exercise" && (
             <form
