@@ -1,86 +1,61 @@
-# Что исправить в Cloudflare для pulser.pp.ua
+# PULSE — регистрация без Email Sending
 
-Причина ошибки Google подтверждена: у `pulse-db` указано **Number of tables: 0**. Привязка базы существует, но схема приложения ещё не создана.
+## 1. Обновить приложение
 
-## 1. Создать таблицы — без удаления базы
+Загрузи содержимое release/pulse-no-email.zip в корень GitHub-репозитория (не сам ZIP). Deploy command в Cloudflare: **pnpm run deploy**. Сборка и миграции выполняются автоматически. Базу pulse-db не удаляй.
 
-Самый быстрый способ через сайт Cloudflare:
+Этот вариант убирает Email Sending, подтверждение email и восстановление через письмо. Регистрация сразу создаёт аккаунт и открывает главную страницу с нулевой статистикой. Если предыдущая попытка уже сохранила аккаунт, используй **Войти** с тем же email и первоначальным паролем.
 
-1. Открой **Storage & databases → D1 → pulse-db → Console**.
-2. Открой в проекте файл `migrations/0001_auth.sql`.
-3. Скопируй его содержимое в SQL Console и выполни. Если Console принимает только одну команду, выполни SQL-операторы по очереди, разделяя по `;`.
-4. Должны появиться семь таблиц приложения: `users`, `identities`, `sessions`, `email_tokens`, `oauth_states`, `fitness_state`, `rate_limits`.
+## 2. Настройки Cloudflare
 
-SQL использует `IF NOT EXISTS`: повторное выполнение не удаляет данные. Не удаляй базу и не меняй её на новую. Если таблицы уже существуют с другой структурой, обратись к диагностике вместо удаления данных.
+| Поле                 | Значение                                    |
+| -------------------- | ------------------------------------------- |
+| APP_ORIGIN           | https://pulser.pp.ua (без / в конце)        |
+| GOOGLE_CLIENT_ID     | Secret: Client ID веб-приложения Google     |
+| GOOGLE_CLIENT_SECRET | Secret: Client Secret того же OAuth-клиента |
+| DB                   | D1 binding → pulse-db                       |
 
-Альтернатива из терминала проекта: `pnpm run db:remote`. Она дополнительно ведёт журнал миграций D1.
+EMAIL_FROM больше не нужен — его можно удалить. Привязка send_email удалена из wrangler.jsonc и не должна присутствовать после публикации. Email Sending подключать или оплачивать для этого варианта не нужно.
 
-## 2. Загрузить обновление и исправить команду деплоя
+**Отдельно про Workers:** хеширование паролей scrypt требует больше CPU, чем лимит Workers Free в 10 мс. Для текущего серверного входа по паролю планируй Workers Paid (от $5/месяц); удаление отправки почты не отменяет вычисления при регистрации и входе. Стоимость: https://developers.cloudflare.com/workers/platform/pricing/ . Лимиты: https://developers.cloudflare.com/workers/platform/limits/ .
 
-Загрузи **содержимое** `release/pulse-google-email-fix.zip` в GitHub с заменой файлов.
+## 3. Google
 
-В настройках сборки Worker:
+В Google Cloud Console для OAuth-клиента типа Web application:
 
-- **Deploy command: `pnpm run deploy`**.
-- Build command можно оставить пустым.
-- Дождись строки `PULSE: Worker published and D1 migrations applied.`.
+- Authorized JavaScript origins: https://pulser.pp.ua
+- Authorized redirect URIs: https://pulser.pp.ua/api/auth/callback/google
 
-Прямой `wrangler deploy` обходит наш шаг создания таблиц. В архиве обязательно должны быть папки `scripts` и `migrations`. Токен сборки должен иметь разрешение **Account → D1 → Edit** на аккаунт этой базы.
+Вход Google не зависит от почтового сервиса. Аккаунты разных способов входа автоматически не объединяются: при занятом адресе используй первоначальный способ. Это предотвращает доступ к чужим тренировкам через совпадение неподтверждённого email.
 
-## 3. Проверить настройки Google
+## 4. Проверить публикацию
 
-Значения на твоём скриншоте имеют правильные имена:
-
-| Поле                   | Значение                                        |
-| ---------------------- | ----------------------------------------------- |
-| `APP_ORIGIN`           | `https://pulser.pp.ua`                          |
-| `EMAIL_FROM`           | `noreply@pulser.pp.ua`                          |
-| `GOOGLE_CLIENT_ID`     | Client ID веб-приложения Google, как Secret     |
-| `GOOGLE_CLIENT_SECRET` | Client Secret того же OAuth-клиента, как Secret |
-| D1 binding             | `DB` → `pulse-db`                               |
-
-Содержимое Google Secrets по скриншоту проверить нельзя. В Google Cloud Console у клиента типа **Web application** укажи:
-
-- Authorized JavaScript origins: `https://pulser.pp.ua`.
-- Authorized redirect URIs: `https://pulser.pp.ua/api/auth/callback/google`.
-
-Адрес `/api/auth/oauth/google` — начало входа, его не нужно указывать как redirect URI.
-
-Если Google-приложение в режиме Testing и требует тестовых пользователей, добавь свой аккаунт в Audience → Test users. Для публикации следуй требованиям Google Auth Platform. Проверку возврата с настоящим Google-аккаунтом выполни после загрузки обновления; тестовые ключи из локальной проверки в production не используются.
-
-При первом успешном входе Google создаёт аккаунт с нулевой статистикой. Apple больше не требуется.
-
-## 4. Включить регистрацию по email
-
-На скриншоте есть `EMAIL_FROM`, но нет **Send Email binding с именем `EMAIL`**. Переменная задаёт адрес отправителя; сам сервис отправки она не подключает.
-
-1. Открой **Compute → Email Service → Email Sending → Onboard Domain**.
-2. Выбери `pulser.pp.ua` и заверши настройку DNS/подтверждения отправителя, которую покажет Cloudflare. Нужен именно Email Sending; простая переадресация Email Routing этого не заменяет.
-3. Привязка `"send_email": [{"name":"EMAIL"}]` уже записана в обновлённом `wrangler.jsonc`. После деплоя в Bindings должны присутствовать **DB** и **EMAIL**.
-4. Оставь `EMAIL_FROM=noreply@pulser.pp.ua` и дождись готовности домена к отправке.
-5. Зарегистрируйся со своим email, открой письмо, нажми подтверждение и войди с паролем.
-
-Если в аккаунте ещё нет доступа к Email Sending, регистрация с подтверждением письма не сможет завершиться; Google работает независимо от отправки писем. Статус `emailAvailable: true` означает наличие binding и адреса отправителя, но фактическая доставка требует проверенного домена и доступного лимита отправки.
-
-Документация: https://developers.cloudflare.com/email-service/get-started/send-emails/
-
-## 5. Проверить результат
-
-Открой `https://pulser.pp.ua/api/auth/config`. После настройки ожидается:
+Открой https://pulser.pp.ua/api/auth/config . Ожидаемый ответ:
 
 ```json
 {
   "configured": true,
-  "emailAvailable": true,
+  "passwordRegistration": true,
   "providers": { "google": true },
-  "checks": { "origin": "ready", "database": "ready", "email": "ready" }
+  "checks": { "origin": "ready", "database": "ready" }
 }
 ```
 
-- `database: missing_schema` → таблицы/колонки ещё не созданы.
-- `email: missing_binding` → не опубликована привязка `EMAIL`.
-- `email: missing_sender` → отсутствует `EMAIL_FROM`.
-- `providers.google: false` при готовой базе → проверь оба Google Secrets.
-- `origin: invalid` → проверь `APP_ORIGIN`, включая отсутствие `/` в конце.
+Если вместо passwordRegistration виден emailAvailable, опубликована старая версия. Проверь последний успешный deployment и обнови страницу.
 
-Если Google по-прежнему сообщает ошибку, в Worker Logs появится событие `auth_request_failed` с идентификатором запроса и безопасным кодом. Пароли, OAuth-коды и значения секретов туда не записываются.
+1. Зарегистрируй новый аккаунт: главная должна открыться сразу, все личные показатели — 0.
+2. Выйди и войди с тем же паролем.
+3. Проверь Google со своим аккаунтом.
+4. Старые аккаунты, ожидавшие письма, могут входить с первоначальным паролем.
+
+Email в регистрации используется как логин, без проверки владения почтовым ящиком. Сохрани пароль: самостоятельного восстановления по почте больше нет. Для Google восстановление остаётся на стороне Google.
+
+## 5. Если есть ошибка
+
+- database: missing_schema — выполни миграции через pnpm run db:remote или содержимое migrations/0001_auth.sql в D1 → pulse-db → Console. Это не удаляет записи.
+- origin: invalid — проверь APP_ORIGIN.
+- providers.google: false — проверь оба Google Secrets.
+- email_unavailable — запрос дошёл до старого Worker: новая версия не отправляет писем и не возвращает этот код.
+- При другом сбое смотри DevTools → Network → запрос → Response: error и requestId. По идентификатору найди auth_request_failed в Worker Logs. Если вместо JSON пришла HTML-страница, проверь исключения и лимиты CPU Worker.
+
+CSP исправлен в public/_headers: разрешены домены Cloudflare Web Analytics. Ошибка загрузки beacon.min.js не вызывает 503 регистрации. Изменение заголовка применяется после сборки и публикации.

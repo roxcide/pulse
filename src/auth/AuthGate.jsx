@@ -13,13 +13,7 @@ export default function AuthGate() {
         <p>Возвращаемся в твой ритм…</p>
       </div>
     );
-  if (
-    !user ||
-    ["recovery", "verify"].includes(
-      new URLSearchParams(location.search).get("auth"),
-    )
-  )
-    return <AuthScreen initialError={error} />;
+  if (!user) return <AuthScreen initialError={error} />;
   return (
     <UserDataProvider key={user.id} user={user}>
       <App />

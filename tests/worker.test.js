@@ -57,7 +57,7 @@ function database() {
     },
   };
 }
-let env, letters, signingKey, jwk;
+let env, signingKey, jwk;
 beforeAll(async () => {
   const keys = await generateKeyPair("RS256");
   signingKey = keys.privateKey;
@@ -69,12 +69,9 @@ beforeAll(async () => {
   };
 });
 beforeEach(() => {
-  letters = [];
   env = {
     APP_ORIGIN: "https://pulse.example",
     DB: database(),
-    EMAIL_FROM: "hello@pulse.example",
-    EMAIL: { send: async (mail) => letters.push(mail) },
   };
 });
 afterEach(() => {
@@ -116,36 +113,35 @@ function call(
     env,
   );
 }
-function token() {
-  return letters.at(-1).text.match(/#token=([\w-]+)/)[1];
-}
 async function register(email = "one@example.com") {
   return call("/api/auth/register", { email, password, name: "Анна" });
 }
 async function account(email = "one@example.com") {
   await register(email);
-  await call("/api/auth/verify", { token: token() });
   const response = await call("/api/auth/login", { email, password });
   expect(response.status).toBe(200);
   return response.headers.get("set-cookie").split(";")[0];
 }
 
 describe("Cloudflare account API", () => {
-  it("requires verified email, hashes passwords, creates secure session and rejects token replay", async () => {
-    expect((await register()).status).toBe(200);
+  it("registers without email sending, hashes passwords and immediately starts a secure session", async () => {
+    const response = await register();
+    expect(response.status).toBe(201);
     const row = env.DB.raw.prepare("SELECT * FROM users").get();
     expect(row.password_hash).toMatch(/^scrypt-v1:/);
     expect(row.password_hash).not.toContain(password);
+    expect(row.email_verified).toBe(0);
+    expect(response.headers.get("set-cookie")).toMatch(
+      /__Host-pulse_session=.*HttpOnly; SameSite=Lax; Max-Age=604800; Secure/,
+    );
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.json()).toEqual({
+      user: { id: row.id, email: row.email, displayName: row.display_name },
+    });
+    const cookie = response.headers.get("set-cookie").split(";")[0];
     expect(
-      (await call("/api/auth/login", { email: row.email, password })).status,
-    ).toBe(403);
-    const verification = token();
-    expect(
-      (await call("/api/auth/verify", { token: verification })).status,
-    ).toBe(200);
-    expect(
-      (await call("/api/auth/verify", { token: verification })).status,
-    ).toBe(400);
+      await (await call("/api/state", undefined, { cookie })).json(),
+    ).toEqual({ state: {} });
     expect(
       (
         await call("/api/auth/login", {
@@ -154,15 +150,12 @@ describe("Cloudflare account API", () => {
         })
       ).status,
     ).toBe(401);
-    const response = await call("/api/auth/login", {
-      email: row.email,
-      password,
-    });
-    expect(response.headers.get("set-cookie")).toMatch(
-      /__Host-pulse_session=.*HttpOnly; SameSite=Lax; Max-Age=604800; Secure/,
-    );
-    expect(response.headers.get("cache-control")).toBe("no-store");
-    expect((await response.json()).user.email).toBe(row.email);
+    expect(
+      (await call("/api/auth/login", { email: row.email, password })).status,
+    ).toBe(200);
+    expect(
+      env.DB.raw.prepare("SELECT count(*) AS n FROM email_tokens").get().n,
+    ).toBe(0);
   });
   it("starts empty and isolates every saved key by authenticated user", async () => {
     const a = await account(),
@@ -269,67 +262,58 @@ describe("Cloudflare account API", () => {
       (await call("/api/state", undefined, { cookie: fresh })).status,
     ).toBe(401);
   });
-  it("resets passwords with single-use tokens and revokes all sessions", async () => {
-    const cookie = await account();
+  it("disables email verification and recovery endpoints", async () => {
+    for (const path of ["reset", "resend", "verify", "update-password"])
+      expect(
+        (
+          await call("/api/auth/" + path, {
+            email: "one@example.com",
+            token: "old-token",
+            password,
+          })
+        ).status,
+      ).toBe(404);
+  });
+  it("allows accounts left pending by the old mail flow to log in with their existing password", async () => {
+    await register();
+    env.DB.raw.exec("DELETE FROM sessions");
     expect(
-      (await call("/api/auth/reset", { email: "one@example.com" })).status,
-    ).toBe(200);
-    const reset = token(),
-      next = "a different strong password";
-    expect(
-      (
-        await call("/api/auth/update-password", {
-          token: reset,
-          password: next,
-        })
-      ).status,
-    ).toBe(200);
-    expect(
-      (
-        await call("/api/auth/update-password", {
-          token: reset,
-          password: next,
-        })
-      ).status,
-    ).toBe(400);
-    expect((await call("/api/state", undefined, { cookie })).status).toBe(401);
+      env.DB.raw.prepare("SELECT email_verified FROM users").get()
+        .email_verified,
+    ).toBe(0);
     expect(
       (await call("/api/auth/login", { email: "one@example.com", password }))
         .status,
-    ).toBe(401);
-    expect(
-      (
-        await call("/api/auth/login", {
-          email: "one@example.com",
-          password: next,
-        })
-      ).status,
     ).toBe(200);
-  });
-  it("rejects expired email links and does not disclose unknown reset accounts", async () => {
-    await register();
-    const expired = token();
-    env.DB.raw.exec("UPDATE email_tokens SET expires_at=0");
-    expect((await call("/api/auth/verify", { token: expired })).status).toBe(
-      400,
-    );
-    expect(
-      await (
-        await call("/api/auth/reset", { email: "unknown@example.com" })
-      ).json(),
-    ).toEqual({ ok: true });
-    expect(letters).toHaveLength(1);
   });
   it("cannot overwrite an existing password by registering the same email", async () => {
     await register();
     const before = env.DB.raw.prepare("SELECT password_hash FROM users").get();
-    await call("/api/auth/register", {
+    const duplicate = await call("/api/auth/register", {
       email: "one@example.com",
       password: "attacker-password",
       name: "Other",
     });
+    expect(duplicate.status).toBe(409);
+    expect(duplicate.headers.get("set-cookie")).toBeNull();
     expect(env.DB.raw.prepare("SELECT password_hash FROM users").get()).toEqual(
       before,
+    );
+  });
+  it("normalizes duplicate addresses and rejects invalid signup data before saving", async () => {
+    for (const data of [
+      { email: "bad-address", name: "Анна", password },
+      { email: "one@example.com", name: " ", password },
+      { email: "one@example.com", name: "Анна", password: "short" },
+    ])
+      expect((await call("/api/auth/register", data)).status).toBe(400);
+    expect(env.DB.raw.prepare("SELECT count(*) AS n FROM users").get().n).toBe(
+      0,
+    );
+    expect((await register(" One@Example.com ")).status).toBe(201);
+    expect((await register("one@example.com")).status).toBe(409);
+    expect(env.DB.raw.prepare("SELECT email FROM users").get().email).toBe(
+      "one@example.com",
     );
   });
   it("rate-limits before repeated expensive login attempts", async () => {
@@ -383,12 +367,11 @@ describe("Cloudflare account API", () => {
       env.DB.raw.prepare("SELECT count(*) AS n FROM oauth_states").get().n,
     ).toBe(0);
   });
-  it("disables unavailable providers and email without pretending to create an account", async () => {
-    delete env.EMAIL;
-    expect((await (await call("/api/auth/config")).json()).emailAvailable).toBe(
-      false,
-    );
-    expect((await register()).status).toBe(503);
+  it("supports password registration without any mail configuration", async () => {
+    const config = await (await call("/api/auth/config")).json();
+    expect(config.passwordRegistration).toBe(true);
+    expect(config).not.toHaveProperty("emailAvailable");
+    expect((await register()).status).toBe(201);
     expect(
       (await call("/api/auth/oauth/google")).headers.get("location"),
     ).toContain("error=provider_unavailable");
@@ -486,17 +469,6 @@ it("does not expose Apple endpoints or capabilities", async () => {
   expect(config.providers).not.toHaveProperty("apple");
   expect((await call("/api/auth/oauth/apple")).status).toBe(404);
 });
-it("reports email prerequisites without exposing credentials", async () => {
-  delete env.EMAIL;
-  let config = await (await call("/api/auth/config")).json();
-  expect(config.checks.email).toBe("missing_binding");
-  expect(config.configured).toBe(true);
-  env.EMAIL = { send: async () => {} };
-  delete env.EMAIL_FROM;
-  config = await (await call("/api/auth/config")).json();
-  expect(config.checks.email).toBe("missing_sender");
-  expect(config.emailAvailable).toBe(false);
-});
 it("logs safe error identifiers without request passwords or tokens", async () => {
   const logged = vi.spyOn(console, "error").mockImplementation(() => {});
   env.DB.prepare = () => {
@@ -535,16 +507,4 @@ it("reuses a Google account on subsequent logins without email sending", async (
   expect(second.headers.get("location")).toBe(env.APP_ORIGIN + "/#dashboard");
   expect(env.DB.raw.prepare("SELECT count(*) AS n FROM users").get().n).toBe(1);
   expect(env.DB.raw.prepare("SELECT id FROM users").get().id).toBe(id);
-});
-it("keeps email accounts unverified when the delivery service rejects the message", async () => {
-  env.EMAIL.send = async () => {
-    throw new Error("sender not verified");
-  };
-  expect((await register()).status).toBe(503);
-  expect(
-    env.DB.raw.prepare("SELECT email_verified FROM users").get().email_verified,
-  ).toBe(0);
-  expect(
-    env.DB.raw.prepare("SELECT count(*) AS n FROM email_tokens").get().n,
-  ).toBe(0);
 });

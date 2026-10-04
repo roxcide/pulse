@@ -18,12 +18,14 @@ export async function api(path, data, method = "POST", accountId) {
   if (!response.ok) {
     const error = new Error(result.error || "server_error");
     error.status = response.status;
+    if (/^[a-f0-9-]{36}$/i.test(result.requestId || ""))
+      error.requestId = result.requestId;
     throw error;
   }
   return result;
 }
 export function authError(error) {
-  return (
+  const message =
     {
       database_not_initialized:
         "Сервис входа ещё не подготовлен. Владелец сайта должен применить миграции базы данных.",
@@ -34,15 +36,10 @@ export function authError(error) {
       account_changed:
         "В другом окне открыт другой аккаунт. Вернись в исходный аккаунт и повтори сохранение.",
       invalid_credentials: "Неверный email или пароль.",
-      email_not_confirmed:
-        "Сначала подтверди email. Письмо можно отправить повторно.",
       invalid_email: "Проверь адрес email.",
       invalid_name: "Укажи имя до 24 символов.",
       invalid_password: "Пароль должен содержать от 10 до 128 символов.",
-      invalid_token:
-        "Ссылка недействительна или уже использована. Запроси новую.",
       rate_limit: "Слишком много попыток. Попробуй позже.",
-      email_unavailable: "Отправка писем пока недоступна. Попробуй позже.",
       not_configured: "Вход пока не настроен. Попробуй позже.",
       provider_unavailable: "Этот способ входа пока недоступен.",
       account_exists:
@@ -54,6 +51,8 @@ export function authError(error) {
       wrong_origin: "Адрес сайта не совпадает с настройками сервера.",
       invalid_state: "Не удалось сохранить данные. Проверь значения и повтори.",
     }[error?.message] ||
-    "Не удалось подключиться. Проверь соединение и попробуй снова."
-  );
+    "Не удалось подключиться. Проверь соединение и попробуй снова.";
+  return error?.requestId
+    ? `${message} Код обращения: ${error.requestId}`
+    : message;
 }

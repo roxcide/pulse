@@ -13,6 +13,7 @@ import AuthGate from "../src/auth/AuthGate";
 import { newAccountState } from "../src/state/defaults";
 
 let requests, saved, session, failSave, failLoad;
+
 beforeEach(() => {
   requests = [];
   saved = {};
@@ -30,7 +31,7 @@ beforeEach(() => {
       if (path === "/api/auth/config")
         return Response.json({
           configured: true,
-          emailAvailable: true,
+          passwordRegistration: true,
           providers: { google: false },
         });
       if (path === "/api/auth/session") return Response.json({ user: session });
@@ -112,7 +113,22 @@ it("logs in through the server and ignores legacy browser demo data", async () =
     requests.some((r) => r.path === "/api/state" && r.method === "PUT"),
   ).toBe(false);
 });
-it("checks matching passwords and submits registration without a fake session", async () => {
+it("checks matching passwords and shows server errors without a fake session", async () => {
+  const original = fetch;
+  const requestId = "61b93423-3600-499f-b08d-21b509ed3d93";
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (path, options) => {
+      if (path === "/api/auth/register") {
+        requests.push({ path, body: JSON.parse(options.body) });
+        return Response.json(
+          { error: "database_unavailable", requestId },
+          { status: 503 },
+        );
+      }
+      return original(path, options);
+    }),
+  );
   const user = userEvent.setup();
   app();
   await screen.findByRole("heading", { name: "С возвращением." });
@@ -128,10 +144,11 @@ it("checks matching passwords and submits registration without a fake session", 
   expect((await screen.findByRole("alert")).textContent).toBe(
     "Пароли не совпадают.",
   );
+  expect(requests.some((r) => r.path === "/api/auth/register")).toBe(false);
   await user.clear(screen.getByLabelText("Повтори пароль"));
   await user.type(screen.getByLabelText("Повтори пароль"), "long password");
   await user.click(screen.getByRole("button", { name: "Создать аккаунт" }));
-  await screen.findByRole("heading", { name: "Проверь свою почту." });
+  expect((await screen.findByRole("alert")).textContent).toContain(requestId);
   expect(session).toBeNull();
   expect(requests.find((r) => r.path === "/api/auth/register").body.name).toBe(
     "Анна",
@@ -177,57 +194,50 @@ it("retains changes on failed save and prevents logout until retry succeeds", as
   );
   await screen.findByRole("heading", { name: "С возвращением." });
 });
-it("requires an explicit click to consume an email verification token", async () => {
-  window.history.replaceState({}, "", "/?auth=verify#token=test-token");
-  app();
-  await screen.findByRole("heading", { name: "Подтверди email." });
-  expect(requests.some((r) => r.path === "/api/auth/verify")).toBe(false);
-  await userEvent.click(
-    screen.getByRole("button", { name: "Подтвердить email" }),
-  );
-  await screen.findByText("Email подтверждён. Теперь можно войти.");
-  expect(requests.find((r) => r.path === "/api/auth/verify").body).toEqual({
-    token: "test-token",
-  });
-  expect(location.hash).toBe("");
-});
-
-it("keeps Google available when only password email delivery is missing", async () => {
+it("registers without mail and opens the empty dashboard immediately", async () => {
   const original = fetch;
   vi.stubGlobal(
     "fetch",
-    vi.fn((path, options) =>
-      path === "/api/auth/config"
-        ? Promise.resolve(
-            Response.json({
-              configured: true,
-              emailAvailable: false,
-              providers: { google: true },
-              checks: {
-                database: "ready",
-                origin: "ready",
-                email: "missing_binding",
-              },
-            }),
-          )
-        : original(path, options),
-    ),
+    vi.fn(async (path, options) => {
+      if (path === "/api/auth/register") {
+        const data = JSON.parse(options.body);
+        session = { id: "new-user", email: data.email, displayName: data.name };
+        requests.push({ path, body: data });
+        return Response.json({ user: session }, { status: 201 });
+      }
+      return original(path, options);
+    }),
   );
   app();
   await screen.findByRole("heading", { name: "С возвращением." });
+  expect(screen.queryByRole("button", { name: "Забыл пароль?" })).toBeNull();
   await userEvent.click(
     screen.getByRole("button", { name: /Зарегистрироваться/ }),
   );
   expect(screen.queryByRole("button", { name: /Apple/ })).toBeNull();
-  expect(
-    screen.getByRole("button", { name: /Продолжить с Google/ }).disabled,
-  ).toBe(false);
   expect(screen.getByRole("button", { name: "Создать аккаунт" }).disabled).toBe(
-    true,
+    false,
   );
-  expect(screen.getByRole("status").textContent).toContain(
-    "Создать аккаунт и войти можно через Google",
+  fireEvent.change(screen.getByLabelText("Как тебя зовут"), {
+    target: { value: "Анна" },
+  });
+  fireEvent.change(screen.getByLabelText("Email"), {
+    target: { value: "new@example.com" },
+  });
+  fireEvent.change(screen.getByLabelText("Пароль", { exact: true }), {
+    target: { value: "a secure test password" },
+  });
+  fireEvent.change(screen.getByLabelText("Повтори пароль"), {
+    target: { value: "a secure test password" },
+  });
+  await userEvent.click(
+    screen.getByRole("button", { name: "Создать аккаунт" }),
   );
+  await screen.findByText("Выбери недельную цель");
+  expect(requests.filter((r) => r.path === "/api/auth/register")).toHaveLength(
+    1,
+  );
+  expect(requests.some((r) => /verify|resend|reset/.test(r.path))).toBe(false);
 });
 it("retains provider configuration when session restoration fails", async () => {
   const original = fetch;
@@ -238,7 +248,7 @@ it("retains provider configuration when session restoration fails", async () => 
         ? Promise.resolve(
             Response.json({
               configured: true,
-              emailAvailable: true,
+              passwordRegistration: true,
               providers: { google: true },
             }),
           )

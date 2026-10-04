@@ -18,11 +18,6 @@ export async function authConfig(env) {
   const checks = {
     origin: "ready",
     database: "ready",
-    email: !env.EMAIL?.send
-      ? "missing_binding"
-      : !env.EMAIL_FROM
-        ? "missing_sender"
-        : "ready",
   };
   try {
     origin(env);
@@ -51,7 +46,7 @@ export async function authConfig(env) {
   const configured = checks.origin === "ready" && checks.database === "ready";
   return {
     configured,
-    emailAvailable: configured && checks.email === "ready",
+    passwordRegistration: configured,
     providers: { google: configured && enabledProviders(env).google },
     checks,
   };

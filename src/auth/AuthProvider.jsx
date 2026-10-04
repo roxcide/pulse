@@ -9,7 +9,7 @@ export function AuthProvider({ children }) {
   const [config, setConfig] = useState({
     configured: false,
     providers: {},
-    emailAvailable: false,
+    passwordRegistration: false,
   });
   async function reloadSession() {
     const result = await api("/api/auth/session");

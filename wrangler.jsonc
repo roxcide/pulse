@@ -20,6 +20,5 @@
     },
   ],
   "triggers": { "crons": ["0 3 * * *"] },
-  "send_email": [{ "name": "EMAIL" }],
-  // APP_ORIGIN и EMAIL_FROM задай как Worker secrets (см. DEPLOY.md).
+  // APP_ORIGIN задай как runtime-переменную Worker (см. DEPLOY.md).
 }

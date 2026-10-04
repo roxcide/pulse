@@ -4,7 +4,6 @@ import {
   body,
   origin,
   hash,
-  randomToken,
   cookie,
   readCookie,
   currentUser,
@@ -22,36 +21,6 @@ import { validateState } from "./state.js";
 
 const json = (data, status = 200, headers = {}) =>
   Response.json(data, { status, headers });
-const emailReady = (env) => Boolean(env.EMAIL?.send && env.EMAIL_FROM);
-async function sendLink(env, user, kind) {
-  if (!emailReady(env)) fail(503, "email_unavailable");
-  const token = randomToken();
-  await env.DB.prepare("INSERT INTO email_tokens VALUES(?,?,?,?)")
-    .bind(
-      await hash(token),
-      user.id,
-      kind,
-      Date.now() + (kind === "verify" ? 86400000 : 1800000),
-    )
-    .run();
-  const link = `${origin(env)}/?auth=${kind === "verify" ? "verify" : "recovery"}#token=${token}`;
-  try {
-    await env.EMAIL.send({
-      from: env.EMAIL_FROM,
-      to: user.email,
-      subject:
-        kind === "verify"
-          ? "PULSE — подтверди email"
-          : "PULSE — восстановление доступа",
-      text: `${kind === "verify" ? "Подтверди email для регистрации в PULSE. Ссылка действует 24 часа." : "Задай новый пароль PULSE. Ссылка действует 30 минут."}\n\n${link}\n\nЕсли ты не отправлял этот запрос, проигнорируй письмо.`,
-    });
-  } catch {
-    await env.DB.prepare("DELETE FROM email_tokens WHERE token_hash = ?")
-      .bind(await hash(token))
-      .run();
-    fail(503, "email_unavailable");
-  }
-}
 async function route(request, env) {
   const path = new URL(request.url).pathname,
     method = request.method;
@@ -122,50 +91,38 @@ async function route(request, env) {
   if (method !== "POST") fail(404, "not_found");
   const data = await body(request);
   await limit(env, `auth:${ip}`, 30);
-  if (
-    path === "/api/auth/register" ||
-    path === "/api/auth/resend" ||
-    path === "/api/auth/reset"
-  ) {
-    if (!emailReady(env)) fail(503, "email_unavailable");
+  if (path === "/api/auth/register") {
     const email = emailValue(data.email);
-    await limit(env, `mail:${email}`, 5, 3600);
-    let user = await env.DB.prepare("SELECT * FROM users WHERE email = ?")
+    checkPassword(data.password);
+    if (
+      typeof data.name !== "string" ||
+      !data.name.trim() ||
+      data.name.trim().length > 24
+    )
+      fail(400, "invalid_name");
+    await limit(env, `register:${email}`, 5, 3600);
+    const existing = await env.DB.prepare(
+      "SELECT id FROM users WHERE email = ?",
+    )
       .bind(email)
       .first();
-    if (path.endsWith("/register")) {
-      checkPassword(data.password);
-      if (
-        typeof data.name !== "string" ||
-        !data.name.trim() ||
-        data.name.trim().length > 24
+    if (existing) fail(409, "account_exists");
+    // Email is a login identifier, not proof of mailbox ownership.
+    const user = await env.DB.prepare(
+      "INSERT INTO users(id,email,display_name,password_hash,created_at) VALUES(?,?,?,?,?) ON CONFLICT(email) DO NOTHING RETURNING *",
+    )
+      .bind(
+        crypto.randomUUID(),
+        email,
+        data.name.trim(),
+        await passwordHash(data.password),
+        Date.now(),
       )
-        fail(400, "invalid_name");
-      if (!user) {
-        user = {
-          id: crypto.randomUUID(),
-          email,
-          display_name: data.name.trim(),
-        };
-        await env.DB.prepare(
-          "INSERT INTO users(id,email,display_name,password_hash,created_at) VALUES(?,?,?,?,?)",
-        )
-          .bind(
-            user.id,
-            email,
-            user.display_name,
-            await passwordHash(data.password),
-            Date.now(),
-          )
-          .run();
-      }
-    }
-    if (path.endsWith("/reset")) {
-      if (user?.email_verified && user.password_hash)
-        await sendLink(env, user, "reset");
-    } else if (user && !user.email_verified)
-      await sendLink(env, user, "verify");
-    return json({ ok: true });
+      .first();
+    if (!user) fail(409, "account_exists");
+    return json({ user: safeUser(user) }, 201, {
+      "Set-Cookie": await newSession(env, user),
+    });
   }
   if (path === "/api/auth/login") {
     const email = emailValue(data.email);
@@ -177,44 +134,9 @@ async function route(request, env) {
       .first();
     if (!(await passwordMatches(data.password, user?.password_hash)))
       fail(401, "invalid_credentials");
-    if (!user.email_verified) fail(403, "email_not_confirmed");
     return json({ user: safeUser(user) }, 200, {
       "Set-Cookie": await newSession(env, user),
     });
-  }
-  if (path === "/api/auth/verify" || path === "/api/auth/update-password") {
-    if (typeof data.token !== "string" || data.token.length > 200)
-      fail(400, "invalid_token");
-    const kind = path.endsWith("/verify") ? "verify" : "reset";
-    let password;
-    if (kind === "reset") {
-      checkPassword(data.password);
-      password = await passwordHash(data.password);
-    }
-    const token = await env.DB.prepare(
-      "DELETE FROM email_tokens WHERE token_hash = ? AND kind = ? AND expires_at > ? RETURNING *",
-    )
-      .bind(await hash(data.token), kind, Date.now())
-      .first();
-    if (!token) fail(400, "invalid_token");
-    if (kind === "verify")
-      await env.DB.prepare("UPDATE users SET email_verified = 1 WHERE id = ?")
-        .bind(token.user_id)
-        .run();
-    else
-      await env.DB.batch([
-        env.DB.prepare("UPDATE users SET password_hash = ? WHERE id = ?").bind(
-          password,
-          token.user_id,
-        ),
-        env.DB.prepare("DELETE FROM sessions WHERE user_id = ?").bind(
-          token.user_id,
-        ),
-        env.DB.prepare("DELETE FROM email_tokens WHERE user_id = ?").bind(
-          token.user_id,
-        ),
-      ]);
-    return json({ ok: true });
   }
   fail(404, "not_found");
 }
@@ -229,7 +151,7 @@ export default {
       const code = errorCode(error),
         requestId = crypto.randomUUID(),
         path = new URL(request.url).pathname;
-      if (!(error instanceof HttpError))
+      if (!(error instanceof HttpError) || error.status >= 500)
         console.error(
           JSON.stringify({
             event: "auth_request_failed",

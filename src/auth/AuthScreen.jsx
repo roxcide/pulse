@@ -2,11 +2,9 @@ import React, { useEffect, useState } from "react";
 import {
   Activity,
   ArrowRight,
-  ArrowLeft,
   Eye,
   EyeOff,
   LockKeyhole,
-  Mail,
   Check,
   LoaderCircle,
 } from "lucide-react";
@@ -38,123 +36,62 @@ function ProviderIcon() {
 
 export default function AuthScreen({ initialError = "" }) {
   const { config, reloadSession } = useAuth();
-  const action = new URLSearchParams(location.search).get("auth");
-  const [mode, setMode] = useState(
-    action === "recovery" ? "update" : action === "verify" ? "verify" : "login",
-  );
-  const [token] = useState(
-    () => new URLSearchParams(location.hash.slice(1)).get("token") || "",
-  );
+  const [mode, setMode] = useState("login");
   const [busy, setBusy] = useState(false),
     [visible, setVisible] = useState(false);
   const [error, setError] = useState(initialError),
-    [message, setMessage] = useState(""),
     [email, setEmail] = useState("");
-  const [cooldown, setCooldown] = useState(0);
   useEffect(() => {
-    if (!cooldown) return;
-    const t = setTimeout(() => setCooldown((n) => n - 1), 1000);
-    return () => clearTimeout(t);
-  }, [cooldown]);
-  useEffect(() => {
-    const code = new URLSearchParams(location.search).get("error");
+    const params = new URLSearchParams(location.search);
+    const code = params.get("error");
     if (code) setError(authError(new Error(code)));
+    if (["verify", "recovery"].includes(params.get("auth"))) {
+      setError(
+        "Ссылки из писем больше не используются. Войди с паролем своего аккаунта.",
+      );
+      window.history.replaceState({}, "", location.pathname);
+    }
   }, []);
   const changeMode = (next) => {
     setMode(next);
     setError("");
-    setMessage("");
     setVisible(false);
     window.history.replaceState({}, "", location.pathname);
   };
   async function submit(event) {
     event.preventDefault();
     setError("");
-    setMessage("");
-    const form = new FormData(event.currentTarget),
-      password = String(form.get("password") || "");
-    if (
-      ["register", "update"].includes(mode) &&
-      password !== form.get("confirm")
-    ) {
+    const form = new FormData(event.currentTarget);
+    const password = String(form.get("password") || "");
+    if (mode === "register" && password !== form.get("confirm")) {
       setError("Пароли не совпадают.");
       return;
     }
     setBusy(true);
     try {
-      if (mode === "login") {
-        await api("/api/auth/login", { email, password });
-        window.history.replaceState({}, "", location.pathname + "#dashboard");
-        await reloadSession();
-      }
-      if (mode === "register") {
-        await api("/api/auth/register", {
+      await api(
+        mode === "register" ? "/api/auth/register" : "/api/auth/login",
+        {
           email,
           password,
-          name: form.get("name"),
-        });
-        setMode("confirm");
-        setCooldown(60);
-      }
-      if (mode === "reset") {
-        await api("/api/auth/reset", { email });
-        setMessage(
-          "Если аккаунт с паролем существует, письмо для восстановления отправлено.",
-        );
-        setCooldown(60);
-      }
-      if (mode === "update") {
-        await api("/api/auth/update-password", { token, password });
-        changeMode("login");
-        setMessage("Пароль обновлён. Войди с новым паролем.");
-        await reloadSession();
-      }
-      if (mode === "verify") {
-        await api("/api/auth/verify", { token });
-        changeMode("login");
-        setMessage("Email подтверждён. Теперь можно войти.");
-      }
+          ...(mode === "register" ? { name: form.get("name") } : {}),
+        },
+      );
+      window.history.replaceState({}, "", location.pathname + "#dashboard");
+      await reloadSession();
     } catch (err) {
       setError(authError(err));
     } finally {
       setBusy(false);
     }
   }
-  async function resend() {
-    setBusy(true);
-    setError("");
-    try {
-      await api("/api/auth/resend", { email });
-      setMessage("Если email ожидает подтверждения, письмо отправлено.");
-      setCooldown(60);
-    } catch (err) {
-      setError(authError(err));
-    } finally {
-      setBusy(false);
-    }
-  }
-  const titles = {
-    login: "С возвращением.",
-    register: "Твой первый шаг.",
-    reset: "Вернём тебя в ритм.",
-    update: "Новый пароль.",
-    confirm: "Проверь свою почту.",
-    verify: "Подтверди email.",
-  };
+  const titles = { login: "С возвращением.", register: "Твой первый шаг." };
   const subtitles = {
     login: "Войди, чтобы продолжить свой путь к цели.",
     register: "Создай аккаунт. Твоя история начинается с тебя.",
-    reset: "Отправим ссылку для восстановления доступа.",
-    update: "Выбери новый пароль для своего аккаунта.",
-    confirm: "Если адрес ещё не подтверждён, на него придёт письмо со ссылкой.",
-    verify: "Нажми кнопку, чтобы завершить регистрацию.",
   };
   const allowed =
-    config.configured &&
-    (mode === "login" ||
-      mode === "verify" ||
-      mode === "update" ||
-      config.emailAvailable);
+    config.configured && (mode === "login" || config.passwordRegistration);
   return (
     <div className="auth-page">
       <section className="auth-story">
@@ -213,24 +150,9 @@ export default function AuthScreen({ initialError = "" }) {
                 : "Не удалось подключить сервис входа. Обнови страницу или попробуй позже."}
             </div>
           )}
-          {config.configured &&
-            !config.emailAvailable &&
-            ["register", "reset"].includes(mode) && (
-              <div className="auth-notice" role="status">
-                Отправка писем ещё не подключена.{" "}
-                {config.providers.google
-                  ? "Создать аккаунт и войти можно через Google."
-                  : "Регистрация по email станет доступна после настройки почты."}
-              </div>
-            )}
           {error && (
             <div className="auth-feedback error" role="alert">
               {error}
-            </div>
-          )}
-          {message && (
-            <div className="auth-feedback success" role="status">
-              {message}
             </div>
           )}
           {["login", "register"].includes(mode) && (
@@ -255,151 +177,87 @@ export default function AuthScreen({ initialError = "" }) {
               </div>
             </>
           )}
-          {mode === "confirm" ? (
-            <div className="confirmation-card">
-              <div className="confirmation-icon">
-                <Mail size={34} />
-              </div>
-              <strong>{email}</strong>
-              <p>
-                Открой письмо и перейди по ссылке. Проверь также папку «Спам».
-              </p>
+          <form key={mode} onSubmit={submit} className="auth-form">
+            <fieldset disabled={busy}>
+              {mode === "register" && (
+                <label className="form-field">
+                  Как тебя зовут
+                  <input
+                    name="name"
+                    autoComplete="given-name"
+                    placeholder="Твоё имя"
+                    maxLength={24}
+                    required
+                  />
+                </label>
+              )}
+              <label className="form-field">
+                Email
+                <input
+                  name="email"
+                  type="email"
+                  autoComplete="email"
+                  placeholder="you@example.com"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                  maxLength={254}
+                />
+              </label>
+
+              <label className="form-field">
+                <span className="password-label">Пароль</span>
+                <div className="password-field">
+                  <input
+                    name="password"
+                    aria-label="Пароль"
+                    type={visible ? "text" : "password"}
+                    autoComplete={
+                      mode === "login" ? "current-password" : "new-password"
+                    }
+                    placeholder={
+                      mode === "login" ? "Введи пароль" : "Не менее 10 символов"
+                    }
+                    minLength={mode === "login" ? 1 : 10}
+                    maxLength={128}
+                    required
+                  />
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label={visible ? "Скрыть пароль" : "Показать пароль"}
+                    aria-pressed={visible}
+                    onClick={() => setVisible((v) => !v)}
+                  >
+                    {visible ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
+                </div>
+              </label>
+              {mode !== "login" && (
+                <label className="form-field">
+                  Повтори пароль
+                  <input
+                    name="confirm"
+                    type={visible ? "text" : "password"}
+                    autoComplete="new-password"
+                    placeholder="Ещё раз, чтобы не ошибиться"
+                    minLength={10}
+                    maxLength={128}
+                    required
+                  />
+                </label>
+              )}
               <button
-                className="secondary-button full-width"
-                onClick={resend}
-                disabled={busy || cooldown > 0}
+                className="primary-button auth-submit"
+                disabled={!allowed}
+                type="submit"
               >
-                {cooldown
-                  ? "Повторить через " + cooldown + " с"
-                  : "Отправить ещё раз"}
+                {busy ? <LoaderCircle size={18} className="spinning" /> : null}
+                {mode === "login" ? "Войти" : "Создать аккаунт"}
+                {!busy && <ArrowRight size={18} />}
               </button>
-            </div>
-          ) : (
-            <form key={mode} onSubmit={submit} className="auth-form">
-              <fieldset disabled={busy}>
-                {mode === "register" && (
-                  <label className="form-field">
-                    Как тебя зовут
-                    <input
-                      name="name"
-                      autoComplete="given-name"
-                      placeholder="Твоё имя"
-                      maxLength={24}
-                      required
-                    />
-                  </label>
-                )}
-                {!["update", "verify"].includes(mode) && (
-                  <label className="form-field">
-                    Email
-                    <input
-                      name="email"
-                      type="email"
-                      autoComplete="email"
-                      placeholder="you@example.com"
-                      value={email}
-                      onChange={(e) => setEmail(e.target.value)}
-                      required
-                      maxLength={254}
-                    />
-                  </label>
-                )}
-                {!["reset", "verify"].includes(mode) && (
-                  <>
-                    <label className="form-field">
-                      <span className="password-label">
-                        Пароль
-                        {mode === "login" && (
-                          <button
-                            type="button"
-                            aria-label="Забыл пароль?"
-                            onClick={() => changeMode("reset")}
-                          >
-                            Забыл пароль?
-                          </button>
-                        )}
-                      </span>
-                      <div className="password-field">
-                        <input
-                          name="password"
-                          aria-label="Пароль"
-                          type={visible ? "text" : "password"}
-                          autoComplete={
-                            mode === "login"
-                              ? "current-password"
-                              : "new-password"
-                          }
-                          placeholder={
-                            mode === "login"
-                              ? "Введи пароль"
-                              : "Не менее 10 символов"
-                          }
-                          minLength={mode === "login" ? 1 : 10}
-                          maxLength={128}
-                          required
-                        />
-                        <button
-                          type="button"
-                          className="icon-button"
-                          aria-label={
-                            visible ? "Скрыть пароль" : "Показать пароль"
-                          }
-                          aria-pressed={visible}
-                          onClick={() => setVisible((v) => !v)}
-                        >
-                          {visible ? <EyeOff size={18} /> : <Eye size={18} />}
-                        </button>
-                      </div>
-                    </label>
-                    {mode !== "login" && (
-                      <label className="form-field">
-                        Повтори пароль
-                        <input
-                          name="confirm"
-                          type={visible ? "text" : "password"}
-                          autoComplete="new-password"
-                          placeholder="Ещё раз, чтобы не ошибиться"
-                          minLength={10}
-                          maxLength={128}
-                          required
-                        />
-                      </label>
-                    )}
-                  </>
-                )}
-                <button
-                  className="primary-button auth-submit"
-                  disabled={!allowed || (mode === "reset" && cooldown > 0)}
-                  type="submit"
-                >
-                  {busy ? (
-                    <LoaderCircle size={18} className="spinning" />
-                  ) : null}
-                  {
-                    {
-                      login: "Войти",
-                      register: "Создать аккаунт",
-                      update: "Сохранить пароль",
-                      verify: "Подтвердить email",
-                      reset: cooldown
-                        ? "Повторить через " + cooldown + " с"
-                        : "Отправить ссылку",
-                    }[mode]
-                  }
-                  {!busy && <ArrowRight size={18} />}
-                </button>
-              </fieldset>
-            </form>
-          )}
-          {mode === "login" && error.includes("подтверди email") && (
-            <button
-              className="auth-back"
-              disabled={busy || cooldown > 0}
-              onClick={resend}
-            >
-              Отправить подтверждение ещё раз
-            </button>
-          )}
+            </fieldset>
+          </form>
           {mode === "login" ? (
             <p className="auth-switch">
               Ещё нет аккаунта?{" "}
@@ -408,22 +266,18 @@ export default function AuthScreen({ initialError = "" }) {
                 <ArrowRight size={13} />
               </button>
             </p>
-          ) : mode === "register" ? (
+          ) : (
             <p className="auth-switch">
               Уже с нами?{" "}
               <button disabled={busy} onClick={() => changeMode("login")}>
                 Войти
               </button>
             </p>
-          ) : (
-            <button
-              className="auth-back"
-              disabled={busy}
-              onClick={() => changeMode("login")}
-            >
-              <ArrowLeft size={16} />
-              Вернуться ко входу
-            </button>
+          )}
+          {mode === "register" && (
+            <p className="auth-privacy">
+              Сохрани пароль: восстановление по почте недоступно.
+            </p>
           )}
           <p className="auth-privacy">
             <LockKeyhole size={13} />

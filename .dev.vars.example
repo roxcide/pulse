@@ -1,6 +1,5 @@
 # Только локальная разработка. Реальные значения: .dev.vars (в .gitignore).
 APP_ORIGIN="http://localhost:8787"
 # Для локальной разработки через Vite вместо этого: http://localhost:5173
-# EMAIL_FROM="hello@example.com"
 # GOOGLE_CLIENT_ID=""
 # GOOGLE_CLIENT_SECRET=""
