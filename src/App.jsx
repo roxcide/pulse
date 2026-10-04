@@ -72,7 +72,7 @@ const formatTime = (seconds) =>
   `${String(Math.floor(Math.max(0, seconds) / 60)).padStart(2, "0")}:${String(Math.max(0, seconds) % 60).padStart(2, "0")}`;
 
 export default function App() {
-  const { user } = useAuth();
+  const { user, isGuest } = useAuth();
   const { status, signOut } = useUserData();
   const [page, setPage] = useState(() => {
     const hash = location.hash.slice(1);
@@ -449,7 +449,7 @@ export default function App() {
             </div>
             <div>
               <strong>{profile.name}</strong>
-              <span>Личный профиль</span>
+              <span>{isGuest ? "Гостевой режим" : "Личный профиль"}</span>
             </div>
             <ChevronRight size={16} />
           </button>
@@ -469,7 +469,9 @@ export default function App() {
                 ? "Сохраняем…"
                 : status === "error"
                   ? "Не сохранено"
-                  : "Сохранено в облаке"}
+                  : isGuest
+                    ? "Сохранено в браузере"
+                    : "Сохранено в облаке"}
             </span>
             <button
               className="icon-button help-button"
@@ -1490,7 +1492,9 @@ export default function App() {
                   </select>
                 </label>
                 <p className="form-hint">
-                  Аккаунт: {user.email}. Тренировки сохраняются в твоём профиле.
+                  {isGuest
+                    ? "Гостевой режим. Прогресс хранится только в этом браузере и не переносится в аккаунт автоматически."
+                    : `Аккаунт: ${user.email}. Тренировки сохраняются в твоём профиле.`}
                 </p>
                 <button className="primary-button full-width" type="submit">
                   Сохранить настройки
@@ -1501,7 +1505,9 @@ export default function App() {
                   className="text-button settings-clean"
                   onClick={signOut}
                 >
-                  Выйти из аккаунта
+                  {isGuest
+                    ? "Войти или зарегистрироваться"
+                    : "Выйти из аккаунта"}
                 </button>
               </form>
             </>
@@ -1821,7 +1827,8 @@ export default function App() {
               </div>
               <p className="form-hint">
                 Твои записи сохраняются в аккаунте. Перед закрытием страницы
-                дождись статуса «Сохранено в облаке».
+                дождись статуса «
+                {isGuest ? "Сохранено в браузере" : "Сохранено в облаке"}».
               </p>
             </>
           )}

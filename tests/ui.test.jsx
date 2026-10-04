@@ -11,6 +11,7 @@ import userEvent from "@testing-library/user-event";
 import { AuthProvider } from "../src/auth/AuthProvider";
 import AuthGate from "../src/auth/AuthGate";
 import { newAccountState } from "../src/state/defaults";
+import { ThemeProvider } from "../src/theme";
 
 let requests, saved, session, failSave, failLoad;
 
@@ -64,9 +65,11 @@ afterEach(() => {
 });
 function app() {
   return render(
-    <AuthProvider>
-      <AuthGate />
-    </AuthProvider>,
+    <ThemeProvider>
+      <AuthProvider>
+        <AuthGate />
+      </AuthProvider>
+    </ThemeProvider>,
   );
 }
 it("creates fresh independent account defaults with no invented personal data", () => {
@@ -263,4 +266,100 @@ it("retains provider configuration when session restoration fails", async () => 
     screen.getByRole("button", { name: /Продолжить с Google/ }).disabled,
   ).toBe(false);
   expect(screen.getByRole("alert").textContent).toContain("сервере");
+});
+
+it("persists guest settings across reloads without calling the account API", async () => {
+  localStorage.setItem("pulse-guest-mode-v1", "true");
+  app();
+  await screen.findByText("Выбери недельную цель");
+  expect(fetch).not.toHaveBeenCalled();
+  await userEvent.click(
+    screen.getByRole("button", { name: "Настройки", exact: true }),
+  );
+  fireEvent.change(screen.getByLabelText("Как тебя зовут"), {
+    target: { value: "Локальный атлет" },
+  });
+  await userEvent.click(
+    screen.getByRole("button", { name: /Сохранить настройки/ }),
+  );
+  expect(
+    JSON.parse(localStorage.getItem("pulse-guest-data-v1")).profile.name,
+  ).toBe("Локальный атлет");
+  cleanup();
+  app();
+  await screen.findByRole("heading", {
+    name: "В твоём ритме, Локальный атлет.",
+  });
+  expect(fetch).not.toHaveBeenCalled();
+  await userEvent.click(
+    screen.getByRole("button", { name: "Настройки", exact: true }),
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "Войти или зарегистрироваться" }),
+  );
+  await screen.findByRole("heading", { name: "С возвращением." });
+  fireEvent.change(screen.getByLabelText("Email"), {
+    target: { value: "one@example.com" },
+  });
+  fireEvent.change(screen.getByLabelText("Пароль", { exact: true }), {
+    target: { value: "existing-password" },
+  });
+  await userEvent.click(
+    screen.getByRole("button", { name: "Войти", exact: true }),
+  );
+  await screen.findByRole("heading", { name: "В твоём ритме, Анна." });
+  expect(saved).toEqual({});
+  expect(
+    JSON.parse(localStorage.getItem("pulse-guest-data-v1")).profile.name,
+  ).toBe("Локальный атлет");
+});
+it("can enter guest mode while authentication is unavailable", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(() => new Promise(() => {})),
+  );
+  app();
+  await userEvent.click(
+    screen.getByRole("button", { name: "Войти как гость" }),
+  );
+  await screen.findByText("Выбери недельную цель");
+  expect(screen.getByText("Сохранено в браузере")).toBeTruthy();
+  expect(localStorage.getItem("pulse-guest-mode-v1")).toBe("true");
+});
+it("keeps unsaved guest changes visible when browser storage is full", async () => {
+  localStorage.setItem("pulse-guest-mode-v1", "true");
+  app();
+  await screen.findByText("Выбери недельную цель");
+  const blocked = vi
+    .spyOn(Storage.prototype, "setItem")
+    .mockImplementation(() => {
+      throw new Error("quota");
+    });
+  await userEvent.click(
+    screen.getByRole("button", { name: "Настройки", exact: true }),
+  );
+  fireEvent.change(screen.getByLabelText("Как тебя зовут"), {
+    target: { value: "Не потерять" },
+  });
+  await userEvent.click(
+    screen.getByRole("button", { name: /Сохранить настройки/ }),
+  );
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "не разрешил сохранить",
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "Настройки", exact: true }),
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "Войти или зарегистрироваться" }),
+  );
+  expect(screen.getByRole("heading", { name: "Твои настройки" })).toBeTruthy();
+  blocked.mockRestore();
+  await userEvent.click(
+    screen.getByRole("button", { name: "Повторить", exact: true }),
+  );
+  expect(
+    JSON.parse(localStorage.getItem("pulse-guest-data-v1")).profile.name,
+  ).toBe("Не потерять");
+  expect(fetch).not.toHaveBeenCalled();
 });

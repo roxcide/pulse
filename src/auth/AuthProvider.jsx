@@ -1,8 +1,18 @@
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { api, authError } from "./client";
 const AuthContext = createContext(null);
+const guestKey = "pulse-guest-mode-v1";
+const guestUser = { id: "guest", displayName: "Гость", email: "" };
+function readGuestMode() {
+  try {
+    return localStorage.getItem(guestKey) === "true";
+  } catch {
+    return false;
+  }
+}
 export const useAuth = () => useContext(AuthContext);
 export function AuthProvider({ children }) {
+  const [isGuest, setGuest] = useState(readGuestMode);
   const [user, setUser] = useState(null),
     [loading, setLoading] = useState(true),
     [error, setError] = useState("");
@@ -15,12 +25,33 @@ export function AuthProvider({ children }) {
     const result = await api("/api/auth/session");
     setUser(result.user);
   }
+  function enterGuest() {
+    try {
+      localStorage.setItem(guestKey, "true");
+    } catch {
+      /* In-memory mode remains available. */
+    }
+    setGuest(true);
+    setError("");
+    window.history.replaceState({}, "", location.pathname + "#dashboard");
+  }
   async function logout() {
-    await api("/api/auth/logout", {});
+    if (isGuest) {
+      try {
+        localStorage.removeItem(guestKey);
+      } catch {
+        /* Storage may be disabled. */
+      }
+      setGuest(false);
+    } else await api("/api/auth/logout", {});
     setUser(null);
     window.history.replaceState({}, "", location.pathname);
   }
   useEffect(() => {
+    if (isGuest) {
+      setLoading(false);
+      return;
+    }
     let alive = true;
     Promise.allSettled([api("/api/auth/config"), api("/api/auth/session")])
       .then(([settings, session]) => {
@@ -40,10 +71,19 @@ export function AuthProvider({ children }) {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [isGuest]);
   return (
     <AuthContext.Provider
-      value={{ user, loading, config, error, reloadSession, logout }}
+      value={{
+        user: isGuest ? guestUser : user,
+        isGuest,
+        enterGuest,
+        loading,
+        config,
+        error,
+        reloadSession,
+        logout,
+      }}
     >
       {children}
     </AuthContext.Provider>

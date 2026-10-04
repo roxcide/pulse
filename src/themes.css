@@ -1,17 +1,16 @@
-/* Palettes adapted from the supplied Monkeytype references.
-   PULSE retains its original declaration fallbacks in styles.css. */
-:root[data-theme="dualshot"] {
-  --theme-bg: #737373;
-  --theme-panel: #646464;
-  --theme-raised: #696969;
-  --theme-border: #858585;
-  --theme-strong-border: #aaaaaa;
-  --theme-text: #171818;
-  --theme-secondary: #212222;
-  --theme-muted: #eeeeee;
-  --theme-accent: #212222;
-  --theme-on-accent: #eeeeee;
-  --theme-overlay: #737373;
+/* Palettes adapted from the supplied references; PULSE uses its original fallbacks. */
+:root[data-theme="mocha"] {
+  --theme-bg: #29211e;
+  --theme-panel: #211a17;
+  --theme-raised: #362b25;
+  --theme-border: #4a3930;
+  --theme-strong-border: #806452;
+  --theme-text: #eee2d6;
+  --theme-secondary: #ddc7b2;
+  --theme-muted: #b9a595;
+  --theme-accent: #cfae91;
+  --theme-on-accent: #211a17;
+  --theme-overlay: #29211e;
 }
 :root[data-theme="alduin"] {
   --theme-bg: #1c1c1c;
@@ -80,8 +79,7 @@
   color: var(--theme-accent);
   border: 2px solid currentColor;
 }
-:root[data-theme]:not([data-theme="pulse"])
-  :is(.workout-hero, .auth-story)::after {
+:root[data-theme]:not([data-theme="pulse"]) .workout-hero::after {
   background: linear-gradient(
     90deg,
     var(--theme-overlay) 0%,
@@ -89,31 +87,6 @@
     color-mix(in srgb, var(--theme-overlay) 65%, transparent)
   );
 }
-:root[data-theme="dualshot"] .sidebar nav .nav-item:nth-child(1) svg {
-  color: #07547f;
-}
-:root[data-theme="dualshot"] .sidebar nav .nav-item:nth-child(2) svg {
-  color: #004e50;
-}
-:root[data-theme="dualshot"] .sidebar nav .nav-item:nth-child(3) svg {
-  color: #ffc45c;
-}
-:root[data-theme="dualshot"] .sidebar nav .nav-item:nth-child(4) svg {
-  color: #850e18;
-}
-:root[data-theme="dualshot"] .sidebar nav .nav-item:nth-child(5) svg {
-  color: #192454;
-}
-:root[data-theme="dualshot"] .sidebar .nav-item:has(> span):last-child > svg {
-  color: #850e18;
-}
-:root[data-theme="dualshot"] .auth-story::before {
-  opacity: 0.15;
-}
-:root[data-theme="dualshot"] .workout-hero::before {
-  opacity: 0.2;
-}
-
 .theme-picker {
   border: 0;
   padding: 0;
@@ -227,4 +200,18 @@
   .theme-option-content {
     transition: none;
   }
+}
+
+.guest-entry {
+  width: 100%;
+  min-height: 48px;
+  margin-top: 18px;
+  justify-content: center;
+}
+.guest-hint {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--muted);
+  text-align: center;
+  margin-top: 9px;
 }

@@ -15,11 +15,11 @@ export const themes = [
     background: "#111211",
   },
   {
-    id: "dualshot",
-    name: "Dualshot",
-    description: "Серый · цветные иконки",
-    colors: ["#737373", "#aaaaaa", "#212222"],
-    background: "#737373",
+    id: "mocha",
+    name: "Mocha",
+    description: "Тёмный шоколад · мягкая карамель",
+    colors: ["#cfae91", "#29211e", "#eee2d6"],
+    background: "#29211e",
   },
   {
     id: "alduin",

@@ -36,7 +36,7 @@ function ProviderIcon() {
 }
 
 export default function AuthScreen({ initialError = "" }) {
-  const { config, reloadSession } = useAuth();
+  const { config, reloadSession, enterGuest } = useAuth();
   const [mode, setMode] = useState("login");
   const [busy, setBusy] = useState(false),
     [visible, setVisible] = useState(false);
@@ -280,6 +280,17 @@ export default function AuthScreen({ initialError = "" }) {
               Сохрани пароль: восстановление по почте недоступно.
             </p>
           )}
+          <button
+            type="button"
+            className="secondary-button guest-entry"
+            disabled={busy}
+            onClick={enterGuest}
+          >
+            Войти как гость <ArrowRight size={16} />
+          </button>
+          <p className="guest-hint">
+            Без аккаунта · прогресс хранится в этом браузере
+          </p>
           <p className="auth-privacy">
             <LockKeyhole size={13} />
             Твои тренировки доступны только тебе.

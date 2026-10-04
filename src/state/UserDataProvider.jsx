@@ -9,8 +9,85 @@ import { LoaderCircle } from "lucide-react";
 import { api, authError } from "../auth/client";
 import { useAuth } from "../auth/AuthProvider";
 import { newAccountState } from "./defaults";
+import { validState } from "../../shared/state";
 const DataContext = createContext(null);
 export const useUserData = () => useContext(DataContext);
+
+const guestStorageKey = "pulse-guest-data-v1";
+function loadGuest(user) {
+  const defaults = newAccountState(user);
+  try {
+    const raw = localStorage.getItem(guestStorageKey);
+    if (!raw) return { data: defaults, error: "" };
+    const saved = JSON.parse(raw);
+    if (!validState(saved)) throw new Error("invalid_guest_data");
+    return { data: { ...defaults, ...saved }, error: "" };
+  } catch {
+    return {
+      data: defaults,
+      error:
+        "Не удалось прочитать данные гостя. Хранилище браузера недоступно или повреждено.",
+    };
+  }
+}
+
+export function GuestDataProvider({ user, children }) {
+  const { logout } = useAuth();
+  const [initial] = useState(() => loadGuest(user));
+  const [data, setData] = useState(initial.data);
+  const current = useRef(data);
+  const [status, setStatus] = useState(initial.error ? "error" : "saved");
+  const [error, setError] = useState(initial.error);
+  const [dirty, setDirty] = useState(false);
+  function persist(next) {
+    try {
+      localStorage.setItem(guestStorageKey, JSON.stringify(next));
+      setStatus("saved");
+      setError("");
+      setDirty(false);
+      return true;
+    } catch {
+      setStatus("error");
+      setError(
+        "Браузер не разрешил сохранить прогресс. Проверь доступ к локальному хранилищу и свободное место.",
+      );
+      return false;
+    }
+  }
+  function update(key, value) {
+    const next = {
+      ...current.current,
+      [key]: typeof value === "function" ? value(current.current[key]) : value,
+    };
+    current.current = next;
+    setData(next);
+    setDirty(true);
+    persist(next);
+  }
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (event) => {
+      event.preventDefault();
+      event.returnValue = "";
+    };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
+  function signOut() {
+    if (!dirty || persist(current.current)) logout();
+  }
+  return (
+    <DataContext.Provider value={{ data, update, status, signOut }}>
+      {status === "error" && (
+        <div className="sync-error" role="alert">
+          <span>{error} Изменения остаются в открытой вкладке.</span>
+          <button onClick={() => persist(current.current)}>Повторить</button>
+        </div>
+      )}
+      {children}
+    </DataContext.Provider>
+  );
+}
 
 export function UserDataProvider({ user, children }) {
   const { logout } = useAuth();
