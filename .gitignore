@@ -12,3 +12,4 @@ previews/
 .DS_Store
 Thumbs.db
 *.log
+!.dev.vars.example

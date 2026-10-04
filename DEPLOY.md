@@ -1,141 +1,157 @@
-# Публикация PULSE: GitHub → Cloudflare
+# PULSE — GitHub → Cloudflare Workers + D1
 
-Рекомендуемый путь: загрузить исходники в GitHub и подключить репозиторий к **Cloudflare Pages**. Cloudflare будет собирать и публиковать сайт после обновлений ветки `main`.
+Приложение содержит React-интерфейс и сервер авторизации на Cloudflare Workers. Аккаунты, сессии и тренировки хранятся в D1. Supabase не используется.
 
-## Если проект уже создан как Cloudflare Worker
+**Просто загрузить папку `dist` теперь недостаточно:** для регистрации и сохранения нужен Worker из этого репозитория. Используй существующий проект Workers; статические Pages / Direct Upload не запускают этот API.
 
-Если в журнале запускается `wrangler deploy`, используй подготовленную конфигурацию Workers. Пересоздавать проект для исправления ошибки `ERR_PNPM_IGNORED_BUILDS` не нужно.
+## 1. Подготовить репозиторий
 
-В обновлённой версии:
+Загрузи содержимое `release/pulse-auth-github.zip` в корень GitHub-репозитория (не сам ZIP). Сохрани скрытые файлы `.github`, `.gitignore`, `.node-version`, `.dev.vars.example`. Не загружай `node_modules`, `.wrangler`, `.dev.vars`, `dist` или `release`.
 
-- `pnpm-workspace.yaml` явно разрешает установочные скрипты `esbuild` и `workerd`.
-- Wrangler `4.147.0` зафиксирован в `package.json` и `pnpm-lock.yaml`.
-- `wrangler.jsonc` задаёт публикацию папки `dist` с обработкой SPA. Автоматическая перенастройка React-приложения Wrangler больше не требуется.
-- `build.command` в `wrangler.jsonc` запускает Vite перед деплоем: папка `dist` создаётся автоматически, даже если отдельный Build command в Cloudflare не задан.
-- `pnpm run deploy:check` выполняет эту же сборку и проверяет конфигурацию без публикации и без входа в аккаунт.
+Если обновляешь старую версию, удали из репозитория прежние `.env.example` и `src/auth/config.js`: они относились к Supabase. Остальные файлы замени версиями из архива, включая `pnpm-lock.yaml`, `wrangler.jsonc`, `server` и `migrations`.
 
-Загрузи обновлённые файлы из `release/github-upload-v3/` в корень GitHub-репозитория и задай в настройках сборки **Workers**:
-
-| Поле           | Значение                                         |
-| -------------- | ------------------------------------------------ |
-| Build command  | Можно оставить пустым: сборку запускает Wrangler |
-| Deploy command | `pnpm run deploy`                                |
-| Root directory | Корень репозитория, где находится `package.json` |
-| `NODE_VERSION` | `24.19.0`                                        |
-| `PNPM_VERSION` | `11.25.0`                                        |
-
-Имя в `wrangler.jsonc` сейчас `pulse`: оно должно совпадать с именем Worker в Cloudflare. Если Worker называется иначе, измени поле `name` на его фактическое имя. Затем запусти повторную сборку последнего коммита. Для Workers статические файлы уже указаны в `assets.directory`; отдельное поле Build output directory не требуется.
-
-Для этой ошибки важна строка `workerd: true`. Строка `Lockfile passes supply-chain policies` — успешная проверка, а не причина сбоя. Интерактивный `pnpm approve-builds` на Cloudflare запускать не нужно: разрешение записано в репозитории.
-
-Для локальной проверки:
+Локально нужны Node.js 24.19+ (24.x) и pnpm 11.25.0:
 
 ```sh
 pnpm install --frozen-lockfile
+pnpm test
 pnpm run deploy:check
 ```
 
-Команда `pnpm run deploy` сначала автоматически собирает `dist` через `build.command`, затем выполняет реальную публикацию в Workers. Прямой вызов `npx wrangler deploy` также выполняет эту сборку. Для Pages используются настройки ниже; отдельная команда deploy там не нужна.
+`deploy:check` собирает Vite и Worker без публикации. `build.command` автоматически создаёт `dist`, поэтому прежняя ошибка `assets.directory does not exist` устранена. В `pnpm-workspace.yaml` разрешены build scripts для `esbuild` и `workerd`; запускать интерактивный `pnpm approve-builds` в Cloudflare не нужно.
 
-## 1. Что куда загружать
+## 2. Создать базу D1
 
-| Артефакт                       | Назначение                                                              |
-| ------------------------------ | ----------------------------------------------------------------------- |
-| `release/github-upload-fixed/` | Чистая папка исходников для загрузки в корень GitHub-репозитория        |
-| `release/pulse-github-v3.zip`  | Те же исходники в архиве; перед загрузкой на GitHub распаковать         |
-| `release/pulse-cloudflare.zip` | Готовый сайт для Cloudflare Pages → Direct Upload                       |
-| `dist/`                        | Результат локальной сборки; содержимое также подходит для Direct Upload |
-
-Архивы в `release/` — снимок подготовленной версии. После изменения кода заново собери `dist` и обнови архивы. Они намеренно исключены из Git вместе с `node_modules`, скриншотами и локальными файлами окружения.
-
-## 2. Загрузка в GitHub через браузер
-
-1. Открой свой репозиторий `ep1aga/pulse`.
-2. Выбери **Add file → Upload files**; в пустом репозитории — **uploading an existing file**.
-3. Открой `release/github-upload-fixed/` или распакуй `pulse-github-fixed.zip`.
-4. Перетащи **содержимое** этой папки в GitHub. `package.json`, `index.html`, `src/` и `public/` должны оказаться в корне репозитория, без дополнительной папки `pulse` или `github-upload`.
-5. Проверь, что загружены также `.github/workflows/build.yml`, `.node-version`, `.gitignore`, `.gitattributes`, `pnpm-lock.yaml` и `pnpm-workspace.yaml`. При необходимости включи показ скрытых файлов в проводнике.
-6. Нажми **Commit changes**, выбрав ветку `main`.
-
-GitHub не распаковывает загруженный ZIP автоматически: загружай распакованные файлы. `node_modules/` и `dist/` для этого варианта не нужны.
-
-Вместо браузера можно выполнить в папке проекта:
+В терминале, войдя в свой Cloudflare:
 
 ```sh
-git add .
-git commit -m "Prepare PULSE for Cloudflare Pages"
-git push -u origin main
+pnpm exec wrangler login
+pnpm exec wrangler d1 create pulse-db
 ```
 
-В текущей локальной копии `origin` уже настроен на `https://github.com/ep1aga/pulse.git`. Если копию проекта создали в другом месте, сначала настрой репозиторий и адрес `origin`. Если ты уже загрузил файлы через браузер, для дальнейшей работы клонируй репозиторий, чтобы не создавать независимую историю коммитов.
+Скопируй выданный `database_id` в `wrangler.jsonc`, заменив `00000000-0000-0000-0000-000000000000`. Это заглушка, она не обозначает действующую базу. `binding` должен остаться `DB`.
 
-## 3. Подключение Cloudflare Pages к GitHub
-
-В Cloudflare открой **Workers & Pages**, создай приложение **Pages** с подключением Git-репозитория и выбери `ep1aga/pulse`. Для этого варианта команда `wrangler deploy` не нужна. Если приложение уже создано как Worker, смотри первый раздел инструкции.
-
-Параметры сборки:
-
-| Поле                                | Значение                                                           |
-| ----------------------------------- | ------------------------------------------------------------------ |
-| Production branch                   | `main`                                                             |
-| Framework preset                    | `React (Vite)`; если такого пункта нет — `None` с настройками ниже |
-| Build command                       | `pnpm run build`                                                   |
-| Build output directory              | `dist`                                                             |
-| Root directory                      | Оставить пустым, если `package.json` в корне репозитория           |
-| Environment variable `NODE_VERSION` | `24.19.0`                                                          |
-| Environment variable `PNPM_VERSION` | `11.25.0`                                                          |
-
-Укажи переменные для **Production** и **Preview**, если интерфейс разделяет окружения. Версия Node также записана в `.node-version`, но явная переменная поможет, если скрытый файл пропущен при ручной загрузке. Используй актуальную среду сборки Pages v3.
-
-Cloudflare автоматически установит зависимости. Для приложения не требуются API-ключи, база данных и серверные переменные. Нажми **Save and Deploy**. После успешной сборки Cloudflare покажет адрес `https://<имя-проекта>.pages.dev`.
-
-Новые коммиты в `main` будут публиковаться автоматически. GitHub Actions отдельно проверяет форматирование и сборку; сам этот workflow сайт не публикует. Если используется workflow, загруженный через интерфейс, убедись, что GitHub Actions разрешены в репозитории.
-
-### Что уже подготовлено
-
-- `pnpm-lock.yaml` фиксирует версии библиотек.
-- `packageManager`, `.node-version` и инструкции задают версии инструментов.
-- `pnpm-workspace.yaml` разрешает необходимые шаги установки `esbuild` и `workerd`.
-- `public/_headers` копируется в `dist`: заголовки типов содержимого и referrer policy, долгое кеширование файлов с хешами в `/assets/`.
-- Навигация использует `#dashboard`, `#workout`, `#calendar` и другие hash-маршруты: обновление страницы не требует серверного роутера.
-- В корне сборки нет `404.html`, поэтому сохраняется стандартная поддержка SPA в Pages.
-
-## 4. Прямая загрузка в Cloudflare без GitHub
-
-Для быстрой ручной публикации создай отдельный проект **Pages → Direct Upload / Upload assets**, укажи имя и перетащи **`pulse-cloudflare.zip`** или папку `dist`. В корне загружаемого архива уже находятся `index.html`, `assets/`, `images/` и `_headers`; выполнять сборку в Cloudflare не нужно.
-
-Если планируешь автоматические обновления из GitHub, сразу используй вариант из раздела 3. Проект Pages, созданный через Direct Upload, нельзя впоследствии переключить на Git integration — для этого придётся создать новый проект. Это ограничение Cloudflare, а не приложения.
-
-## 5. Локальная проверка перед обновлениями
-
-Установи Node.js версии из `.node-version`, затем:
+Примени схему перед первым запуском:
 
 ```sh
-npm install --global pnpm@11.25.0
-pnpm install --frozen-lockfile
-pnpm run format:check
-pnpm run build
-pnpm run preview
+pnpm run db:remote
 ```
 
-Локальный предпросмотр: `http://localhost:4173`. Для разработки: `pnpm run dev` и `http://localhost:5173`.
+Команда создаст таблицы пользователей, OAuth-идентификаторов, сессий, одноразовых токенов, ограничений частоты запросов и личных данных. В базе нет демонстрационных пользователей и тренировок. Не меняй `database_id` уже работающего проекта на новую базу, если хочешь сохранить аккаунты.
 
-После публикации проверь запуск тренировки, таймер, сохранение подходов после обновления страницы и календарь на телефоне. Выпуск сборки проверен локально; фактический деплой и GitHub Actions требуют загрузки в твои аккаунты.
+## 3. Настроить Worker и основной адрес
 
-## Данные пользователей
+Имя `name` в `wrangler.jsonc` должно совпадать с именем твоего Worker.
 
-История и настройки сохраняются в `localStorage` конкретного браузера и домена. Они не входят в исходники или архив сборки. На новом домене появится новая локальная история с демонстрационными примерами; данные с `localhost` автоматически не переносятся. Аккаунты и синхронизация между устройствами не подключены.
+В Cloudflare **Workers & Pages → Worker → Settings → Variables and Secrets** добавь runtime-переменную `APP_ORIGIN`: полный основной адрес сайта, например `https://pulse.example.com`, **без завершающего `/` и без пути**. Можно использовать основной HTTPS-адрес `workers.dev`. Это не `VITE_*` и не переменная только этапа сборки.
 
-## Официальная документация
+Письма, OAuth callback и проверка Origin используют именно этот адрес. Preview-домены не смогут работать с production-аккаунтами: для них нужен отдельный Worker, отдельная база и свои настройки. При смене домена обнови `APP_ORIGIN` и redirect URI у провайдеров.
 
-- [React на Cloudflare Pages](https://developers.cloudflare.com/pages/framework-guides/deploy-a-react-site/)
-- [Версии Node.js и pnpm в Pages](https://developers.cloudflare.com/pages/configuration/build-image/)
-- [Подключение Git](https://developers.cloudflare.com/pages/get-started/git-integration/)
-- [Direct Upload и его ограничения](https://developers.cloudflare.com/pages/get-started/direct-upload/)
-- [Заголовки Pages](https://developers.cloudflare.com/pages/configuration/headers/)
-- [Загрузка файлов в GitHub](https://docs.github.com/en/repositories/working-with-files/managing-files/adding-a-file-to-a-repository)
-- [Разрешения установочных скриптов pnpm](https://pnpm.io/settings/build#allowbuilds)
-- [Автоконфигурация Wrangler](https://developers.cloudflare.com/workers/framework-guides/automatic-configuration/)
-- [Параметры сборки Workers](https://developers.cloudflare.com/workers/ci-cd/builds/configuration/)
+Для входа по паролю планируй **Workers Paid**: scrypt намеренно требует вычислительного времени, а Workers Free ограничен 10 мс CPU на запрос. Не уменьшай стоимость хеширования ради обхода лимита. См. [лимиты Cloudflare Workers](https://developers.cloudflare.com/workers/platform/limits/).
 
-- [Сборка перед публикацией Wrangler](https://developers.cloudflare.com/workers/wrangler/custom-builds/)
+## 4. Подтверждение email и восстановление пароля
+
+Подключение подготовлено через **Cloudflare Email Service (отправка писем, Beta)**. Нужен доступ к отправке в твоём аккаунте и подтверждённый домен отправителя. Обычная переадресация Email Routing не заменяет транзакционную отправку писем всем пользователям.
+
+1. Подключи домен в Cloudflare Email Service и выполни его инструкции DNS/верификации.
+2. Добавь в корневой объект `wrangler.jsonc` (с запятой после предыдущего поля):
+
+```json
+"send_email": [{ "name": "EMAIL" }]
+```
+
+3. Добавь runtime-переменную `EMAIL_FROM`, например `hello@example.com`, с подтверждённого домена.
+4. Повторно опубликуй Worker и проверь доставку письма на собственный адрес.
+
+Документация: [Workers API отправки писем](https://developers.cloudflare.com/email-service/api/send-emails/workers-api/), [начало работы](https://developers.cloudflare.com/email-service/get-started/send-emails/).
+
+Без `EMAIL` и `EMAIL_FROM` формы регистрации/восстановления недоступны. Вход существующих пользователей и настроенный OAuth могут работать независимо. Доступ к Email Service и фактическая доставка требуют проверки в твоём Cloudflare-аккаунте.
+
+Регистрация требует подтверждения email. Ссылка действует 24 часа; сброс пароля — 30 минут. Ссылки одноразовые, открытие письма само по себе не расходует токен: пользователь нажимает кнопку подтверждения. Сброс пароля завершает все прежние сессии.
+
+## 5. Вход через Google
+
+В Google Cloud Console настрой OAuth consent screen и создай OAuth Client типа **Web application**.
+
+- Authorized JavaScript origin: твой `APP_ORIGIN`.
+- Authorized redirect URI: `https://ТВОЙ-ДОМЕН/api/auth/callback/google`.
+- Для приложения в режиме Testing добавь свои тестовые аккаунты; для публичного входа заверши публикацию/проверки, которые запросит Google.
+
+Добавь в **Worker Secrets**:
+
+```sh
+pnpm exec wrangler secret put GOOGLE_CLIENT_ID
+pnpm exec wrangler secret put GOOGLE_CLIENT_SECRET
+```
+
+Значения вводятся по запросу CLI. Не помещай их в React, GitHub, `VITE_*` или архив. После настройки кнопка Google включается автоматически.
+
+Документация: [Google OpenID Connect](https://developers.google.com/identity/openid-connect/openid-connect).
+
+## 6. Вход через Apple
+
+В Apple Developer настрой Sign in with Apple для App ID и связанного Services ID (веб-клиент), зарегистрируй домен и Return URL:
+
+`https://ТВОЙ-ДОМЕН/api/auth/callback/apple`
+
+Для публичного веб-входа требуется конфигурация Apple Developer, включая ключ Sign in with Apple `.p8`. Добавь Worker Secrets:
+
+| Секрет              | Значение                                               |
+| ------------------- | ------------------------------------------------------ |
+| `APPLE_CLIENT_ID`   | Services ID веб-клиента                                |
+| `APPLE_TEAM_ID`     | Team ID                                                |
+| `APPLE_KEY_ID`      | ID ключа `.p8`                                         |
+| `APPLE_PRIVATE_KEY` | Полное содержимое `.p8`, включая BEGIN/END PRIVATE KEY |
+
+Например: `pnpm exec wrangler secret put APPLE_PRIVATE_KEY`, затем вставь PEM. Поддерживаются реальные переносы строк и буквальные `\n`. Worker сам подписывает краткоживущий client secret для обмена кода. Ключ `.p8` никогда не загружай в репозиторий.
+
+Callback принимает Apple `form_post`; OAuth-cookie использует `Secure; HttpOnly; SameSite=None`. Для проверки Apple нужен HTTPS-домен, зарегистрированный у Apple, а не localhost.
+
+Документация: [Sign in with Apple](https://developer.apple.com/sign-in-with-apple/).
+
+Аккаунты разных способов входа **не объединяются автоматически по совпадению email**. Если email уже занят, приложение предлагает первоначальный способ входа. Apple Hide My Email может создать отдельный аккаунт. Интерфейса привязки нескольких способов к одному аккаунту в этой версии нет.
+
+## 7. Подключить сборку из GitHub
+
+В Cloudflare Workers подключи репозиторий и задай:
+
+| Поле           | Значение                                            |
+| -------------- | --------------------------------------------------- |
+| Root directory | Корень с `package.json`                             |
+| Build command  | Можно оставить пустым: Vite запускается из Wrangler |
+| Deploy command | `pnpm run deploy`                                   |
+| `NODE_VERSION` | `24.19.0`                                           |
+| `PNPM_VERSION` | `11.25.0`                                           |
+
+Миграцию D1 выполни отдельно до первого запуска. Секреты задаются для исполняемого Worker; наличие их только в Build variables недостаточно. GitHub Actions проверяет форматирование, тесты и dry-run, но не публикует приложение.
+
+## 8. Проверить после публикации
+
+1. Открой `/api/auth/config`: `configured: true`; `emailAvailable: true` после подключения почты; включённые провайдеры `true`. Значения секретов endpoint не раскрывает.
+2. Зарегистрируйся, получи письмо, подтверди email и войди.
+3. Убедись: история и планы пустые, тренировок/часов/поднятого веса — 0, недельная цель не задана. Каталог упражнений и программы являются шаблонами, а не личной историей; стартовые рабочие веса — 0.
+4. Выбери программу, выполни подход, заверши тренировку и дождись «Сохранено в облаке». Обнови страницу — запись должна сохраниться.
+5. Выйди, войди в другой новый аккаунт и проверь пустую историю.
+6. Проверь сброс пароля и Google/Apple на основном домене.
+
+## Локальная разработка
+
+```sh
+pnpm run db:local
+```
+
+Скопируй `.dev.vars.example` в `.dev.vars` и запусти `pnpm run dev:worker`. Открывай **http://localhost:8787**: это значение `APP_ORIGIN` в примере. `.dev.vars` игнорируется Git. Локальная D1 находится в `.wrangler` и никогда не публикуется.
+
+Для HMR запусти Worker с `APP_ORIGIN=http://localhost:5173` в `.dev.vars`, затем во втором терминале `pnpm dev` и открывай localhost:5173. Vite проксирует `/api` к Worker. `pnpm preview` показывает только статическую сборку и не запускает API.
+
+При локальном запуске без почтового binding регистрация недоступна. Полные email-сценарии проверяются автоматически с тестовым почтовым адаптером, без отправки реальных писем. Проверку настоящей доставки проводи на отдельном тестовом Worker с Email Service.
+
+## Данные и ограничения версии
+
+- Пользователь определяется только серверной сессией; запрос не может выбрать чужой `user_id`. Каждый аккаунт получает отдельное состояние D1. Старые общие `pulse-*` записи localStorage не импортируются.
+- Пароли: scrypt с индивидуальной солью. В D1 лежат хеши паролей и токенов; браузер хранит только HttpOnly session-cookie, срок — 7 дней.
+- Изменения отправляются автоматически. При ошибке они остаются в памяти открытой вкладки, появляется кнопка повтора, выход блокируется до сохранения. Полноценного офлайн-режима нет; не закрывай страницу с несохранёнными изменениями.
+- При одновременном редактировании на разных устройствах последнее сохранение каждого раздела побеждает; совместное редактирование и автоматическое слияние не реализованы.
+- Валидация ограничивает размер запроса 2 МиБ и число элементов. Хранение истории — до 10 000 тренировок, в зависимости от размера записей; для больших объёмов потребуется разнести записи по отдельным таблицам.
+- Ограничение частоты работает через D1. Ежедневный Cron удаляет истёкшие сессии, токены и счётчики. История тренировок этим заданием не удаляется.
+- Тесты проверяют регистрацию, одноразовые ссылки, CSRF, истечение сессий, выход, сброс пароля, разделение аккаунтов, OAuth state и ошибки сохранения. Реальные OAuth-ключи и доставка почты не проверены без настроек владельца.

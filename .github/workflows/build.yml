@@ -29,6 +29,8 @@ jobs:
         run: pnpm install --frozen-lockfile
       - name: Check formatting
         run: pnpm run format:check
+      - name: Test authentication and account isolation
+        run: pnpm test
       - name: Build and validate Workers deployment from a clean checkout
         run: pnpm run deploy:check
         env:

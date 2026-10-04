@@ -30,19 +30,18 @@ import {
   LogOut,
   CheckCheck,
 } from "lucide-react";
+import { useAuth } from "./auth/AuthProvider";
+import { useUserData } from "./state/UserDataProvider";
 import { useStoredState } from "./hooks";
 import {
-  initialExercises,
   programs,
   muscles,
   equipment,
-  defaultSplit,
   splitExercises,
   splitOptions,
   dateKey,
   monday,
   addDays,
-  createDemoHistory,
   fullDayNames,
 } from "./data";
 import {
@@ -72,23 +71,18 @@ const formatTime = (seconds) =>
   `${String(Math.floor(Math.max(0, seconds) / 60)).padStart(2, "0")}:${String(Math.max(0, seconds) % 60).padStart(2, "0")}`;
 
 export default function App() {
+  const { user } = useAuth();
+  const { status, signOut } = useUserData();
   const [page, setPage] = useState(() => {
     const hash = location.hash.slice(1);
     return titles[hash] ? hash : "dashboard";
   });
-  const [exercises, setExercises] = useStoredState(
-    "exercises",
-    initialExercises,
-  );
-  const [split, setSplit] = useStoredState("split", defaultSplit);
-  const [history, setHistory] = useStoredState("history", createDemoHistory);
+  const [exercises, setExercises] = useStoredState("exercises");
+  const [split, setSplit] = useStoredState("split");
+  const [history, setHistory] = useStoredState("history");
   const [plans, setPlans] = useStoredState("plans", []);
   const [active, setActive] = useStoredState("active", null);
-  const [profile, setProfile] = useStoredState("profile", {
-    name: "Александр",
-    goal: 3,
-    rest: 90,
-  });
+  const [profile, setProfile] = useStoredState("profile");
   const [modal, setModal] = useState(null),
     [toast, setToast] = useState("");
   const closeModal = useCallback(() => setModal(null), []);
@@ -158,6 +152,10 @@ export default function App() {
     if (active) {
       navigate("workout");
       notify("Продолжаем текущую тренировку");
+      return;
+    }
+    if (name === "Не запланировано") {
+      navigate("programs");
       return;
     }
     if (name === "Отдых") {
@@ -258,7 +256,7 @@ export default function App() {
         : records.reduce((sum, h) => sum + h[metric], 0);
     });
     const max = Math.max(1, ...values);
-    return values.map((value) => Math.max(3, Math.round((value / max) * 38)));
+    return values.map((value) => Math.round((value / max) * 38));
   }
   function selectDate(key) {
     setMonth(new Date(key + "T12:00:00"));
@@ -322,12 +320,16 @@ export default function App() {
               ? "Продолжай\nв своём ритме."
               : todayName === "Отдых"
                 ? "Восстановление —\nтоже прогресс."
-                : "Сильнее\nс каждым днём."}
+                : todayName === "Не запланировано"
+                  ? "Твоя история\nначинается здесь."
+                  : "Сильнее\nс каждым днём."}
           </h2>
           <p>
             {todayName === "Отдых"
               ? "Дай телу отдохнуть. Завтра — новый шаг вперёд."
-              : "Не нужно быть идеальным. Просто продолжай."}
+              : todayName === "Не запланировано"
+                ? "Выбери программу и начни первую тренировку."
+                : "Не нужно быть идеальным. Просто продолжай."}
           </p>
           <div className="hero-workout">
             <div className="hero-workout-icon">
@@ -338,9 +340,15 @@ export default function App() {
               <span>
                 {todayName === "Отдых"
                   ? "Твой день восстановления"
-                  : `${(splitExercises[todayName] || programs[0].exercises).length} упражнений`}
+                  : todayName === "Не запланировано"
+                    ? "План на сегодня пока пуст"
+                    : `${(splitExercises[todayName] || programs[0].exercises).length} упражнений`}
                 <i />
-                {todayName === "Отдых" ? "Без спешки" : "≈ 50 минут"}
+                {todayName === "Отдых"
+                  ? "Без спешки"
+                  : todayName === "Не запланировано"
+                    ? "В твоём темпе"
+                    : "≈ 50 минут"}
               </span>
             </div>
           </div>
@@ -355,7 +363,9 @@ export default function App() {
               ? "Продолжить тренировку"
               : todayName === "Отдых"
                 ? "Выбрать тренировку"
-                : "Начать тренировку"}
+                : todayName === "Не запланировано"
+                  ? "Выбрать тренировку"
+                  : "Начать тренировку"}
             <ArrowRight size={18} />
           </button>
         </div>
@@ -454,7 +464,11 @@ export default function App() {
           <div className="topbar-right">
             <span className="demo-label">
               <span />
-              Демо-профиль
+              {status === "saving"
+                ? "Сохраняем…"
+                : status === "error"
+                  ? "Не сохранено"
+                  : "Сохранено в облаке"}
             </span>
             <button
               className="icon-button help-button"
@@ -547,13 +561,13 @@ export default function App() {
                   <div
                     className="goal-ring"
                     style={{
-                      "--progress": `${Math.min(100, (weekDays / profile.goal) * 100)}%`,
+                      "--progress": `${Math.min(100, profile.goal ? (weekDays / profile.goal) * 100 : 0)}%`,
                     }}
                   >
                     <div>
                       <strong>
                         {weekDays}
-                        <span> / {profile.goal}</span>
+                        <span> / {profile.goal || "—"}</span>
                       </strong>
                       <span>тренировки</span>
                     </div>
@@ -562,9 +576,11 @@ export default function App() {
                     <span className="lime">
                       <TrendingUp size={16} />
                     </span>
-                    {weekDays >= profile.goal
-                      ? "Недельная цель достигнута!"
-                      : `Ещё ${Math.max(0, profile.goal - weekDays)} до недельной цели`}
+                    {!profile.goal
+                      ? "Выбери недельную цель"
+                      : weekDays >= profile.goal
+                        ? "Недельная цель достигнута!"
+                        : `Ещё ${Math.max(0, profile.goal - weekDays)} до недельной цели`}
                   </div>
                   <p>Стабильность важнее совершенства.</p>
                   <button
@@ -608,10 +624,11 @@ export default function App() {
                   {
                     icon: Target,
                     value: weekDays,
-                    unit: `/ ${profile.goal}`,
+                    unit: `/ ${profile.goal || "—"}`,
                     label: "Тренировок за неделю",
-                    note:
-                      weekDays >= profile.goal
+                    note: !profile.goal
+                      ? "Цель пока не задана"
+                      : weekDays >= profile.goal
                         ? "Цель выполнена"
                         : "Держи свой темп",
                     graph: weeklyBars("count"),
@@ -840,8 +857,12 @@ export default function App() {
               <div className="section-heading">
                 <h2>Твоя идеальная неделя</h2>
                 <span className="subtle-tag">
-                  {split.filter((s) => s !== "Отдых").length} тренировок в
-                  неделю
+                  {
+                    split.filter(
+                      (s) => !["Отдых", "Не запланировано"].includes(s),
+                    ).length
+                  }{" "}
+                  тренировок в неделю
                 </span>
               </div>
               <WeekSchedule
@@ -953,7 +974,7 @@ export default function App() {
                       >
                         <span className="completed-label">
                           <CheckCheck size={15} />
-                          Выполнено{h.demo ? " · демо" : ""}
+                          Выполнено
                         </span>
                         <h3>{h.name}</h3>
                         <p>
@@ -1039,7 +1060,6 @@ export default function App() {
                             "ru-RU",
                             { day: "numeric", month: "long" },
                           )}
-                          {h.demo ? " · демо" : ""}
                         </span>
                       </div>
                       <span>
@@ -1448,6 +1468,7 @@ export default function App() {
               <label className="form-field">
                 Цель: тренировочных дней в неделю
                 <select name="goal" defaultValue={profile.goal}>
+                  <option value={0}>Не задана</option>
                   {[1, 2, 3, 4, 5, 6, 7].map((n) => (
                     <option key={n} value={n}>
                       {n}
@@ -1466,8 +1487,7 @@ export default function App() {
                 </select>
               </label>
               <p className="form-hint">
-                Данные сохраняются в этом браузере. Начальная история содержит
-                демонстрационные тренировки.
+                Аккаунт: {user.email}. Тренировки сохраняются в твоём профиле.
               </p>
               <button className="primary-button full-width" type="submit">
                 Сохранить настройки
@@ -1476,12 +1496,9 @@ export default function App() {
               <button
                 type="button"
                 className="text-button settings-clean"
-                onClick={() => {
-                  setHistory((h) => h.filter((x) => !x.demo));
-                  notify("Демонстрационная история удалена");
-                }}
+                onClick={signOut}
               >
-                Очистить демо-историю
+                Выйти из аккаунта
               </button>
             </form>
           )}
@@ -1799,9 +1816,8 @@ export default function App() {
                 </div>
               </div>
               <p className="form-hint">
-                Это локальный прототип. Демо-историю можно очистить в
-                настройках. Данные хранятся только в этом браузере; облачная
-                синхронизация не подключена.
+                Твои записи сохраняются в аккаунте. Перед закрытием страницы
+                дождись статуса «Сохранено в облаке».
               </p>
             </>
           )}
@@ -1810,7 +1826,6 @@ export default function App() {
               <span className="completed-label">
                 <CheckCheck size={17} />
                 Тренировка завершена
-                {modal.entry.demo ? " · демонстрационные данные" : ""}
               </span>
               <div className="history-detail-stats">
                 <div>
@@ -1837,12 +1852,6 @@ export default function App() {
                   </p>
                 </div>
               ))}
-              {modal.entry.demo && (
-                <p className="form-hint">
-                  Пример истории. Заверши свою тренировку, чтобы увидеть здесь
-                  все упражнения и подходы.
-                </p>
-              )}
             </>
           )}
         </Modal>

@@ -21,7 +21,7 @@ export const initialExercises = [
     name: "Жим штанги лёжа",
     muscle: "Грудь",
     equipment: "Штанга",
-    weight: 60,
+    weight: 0,
     reps: 10,
   },
   {
@@ -29,7 +29,7 @@ export const initialExercises = [
     name: "Жим гантелей на наклонной",
     muscle: "Грудь",
     equipment: "Гантели",
-    weight: 20,
+    weight: 0,
     reps: 12,
   },
   {
@@ -37,7 +37,7 @@ export const initialExercises = [
     name: "Сведение рук в кроссовере",
     muscle: "Грудь",
     equipment: "Тренажёр",
-    weight: 15,
+    weight: 0,
     reps: 12,
   },
   {
@@ -45,7 +45,7 @@ export const initialExercises = [
     name: "Разгибание рук на блоке",
     muscle: "Трицепс",
     equipment: "Тренажёр",
-    weight: 25,
+    weight: 0,
     reps: 12,
   },
   {
@@ -61,7 +61,7 @@ export const initialExercises = [
     name: "Приседания со штангой",
     muscle: "Ноги",
     equipment: "Штанга",
-    weight: 60,
+    weight: 0,
     reps: 10,
   },
   {
@@ -69,7 +69,7 @@ export const initialExercises = [
     name: "Жим ногами",
     muscle: "Ноги",
     equipment: "Тренажёр",
-    weight: 100,
+    weight: 0,
     reps: 12,
   },
   {
@@ -77,7 +77,7 @@ export const initialExercises = [
     name: "Выпады с гантелями",
     muscle: "Ноги",
     equipment: "Гантели",
-    weight: 16,
+    weight: 0,
     reps: 12,
   },
   {
@@ -85,7 +85,7 @@ export const initialExercises = [
     name: "Жим гантелей сидя",
     muscle: "Плечи",
     equipment: "Гантели",
-    weight: 16,
+    weight: 0,
     reps: 10,
   },
   {
@@ -93,7 +93,7 @@ export const initialExercises = [
     name: "Махи гантелями в стороны",
     muscle: "Плечи",
     equipment: "Гантели",
-    weight: 8,
+    weight: 0,
     reps: 15,
   },
   {
@@ -101,7 +101,7 @@ export const initialExercises = [
     name: "Тяга верхнего блока",
     muscle: "Спина",
     equipment: "Тренажёр",
-    weight: 45,
+    weight: 0,
     reps: 12,
   },
   {
@@ -109,7 +109,7 @@ export const initialExercises = [
     name: "Тяга штанги в наклоне",
     muscle: "Спина",
     equipment: "Штанга",
-    weight: 40,
+    weight: 0,
     reps: 10,
   },
   {
@@ -117,7 +117,7 @@ export const initialExercises = [
     name: "Подъём гантелей на бицепс",
     muscle: "Бицепс",
     equipment: "Гантели",
-    weight: 12,
+    weight: 0,
     reps: 12,
   },
   {
@@ -165,21 +165,14 @@ export const programs = [
   },
 ];
 export const splitOptions = [
+  "Не запланировано",
   "Отдых",
   "Ноги · Плечи",
   "Спина · Бицепс",
   "Грудь · Трицепс",
   "Full Body",
 ];
-export const defaultSplit = [
-  "Ноги · Плечи",
-  "Отдых",
-  "Спина · Бицепс",
-  "Отдых",
-  "Грудь · Трицепс",
-  "Full Body",
-  "Отдых",
-];
+export const defaultSplit = Array(7).fill("Не запланировано");
 export const splitExercises = {
   "Ноги · Плечи": ["squat", "legpress", "lunge", "shoulder", "raise"],
   "Спина · Бицепс": ["pulldown", "row", "curl", "crunch"],
@@ -209,23 +202,4 @@ export function addDays(d, n) {
   const date = new Date(d);
   date.setDate(date.getDate() + n);
   return date;
-}
-export function createDemoHistory() {
-  const result = [];
-  for (let days = 1; result.length < 12; days++) {
-    const date = addDays(new Date(), -days);
-    const name = defaultSplit[(date.getDay() + 6) % 7];
-    if (name === "Отдых") continue;
-    const i = result.length;
-    result.push({
-      id: "demo-" + i,
-      date: dateKey(date),
-      name,
-      duration: 42 + (i % 4) * 6,
-      volume: 2400 + i * 160,
-      sets: 15 + (i % 3),
-      demo: true,
-    });
-  }
-  return result;
 }

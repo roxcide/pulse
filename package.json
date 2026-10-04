@@ -14,8 +14,12 @@
     "deploy": "wrangler deploy",
     "deploy:check": "wrangler deploy --dry-run",
     "preview": "vite preview --host 0.0.0.0",
-    "format": "prettier --write src index.html DEPLOY.md package.json pnpm-workspace.yaml wrangler.jsonc .github/workflows/build.yml",
-    "format:check": "prettier --check src index.html DEPLOY.md package.json pnpm-workspace.yaml wrangler.jsonc .github/workflows/build.yml"
+    "format": "prettier --write src index.html DEPLOY.md package.json pnpm-workspace.yaml wrangler.jsonc .github/workflows/build.yml server tests vite.config.js",
+    "format:check": "prettier --check src index.html DEPLOY.md package.json pnpm-workspace.yaml wrangler.jsonc .github/workflows/build.yml server tests vite.config.js",
+    "dev:worker": "wrangler dev",
+    "db:local": "wrangler d1 migrations apply DB --local",
+    "db:remote": "wrangler d1 migrations apply DB --remote",
+    "test": "vitest run"
   },
   "dependencies": {
     "jose": "^6.2.12",

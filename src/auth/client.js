@@ -1,34 +1,51 @@
-import { createClient } from '@supabase/supabase-js';
-import { validateAuthConfig } from './config';
-
-const config = validateAuthConfig(import.meta.env);
-export const authConfigured = config.configured;
-export const enabledProviders = {
-  google: import.meta.env.VITE_AUTH_GOOGLE_ENABLED !== 'false',
-  apple: import.meta.env.VITE_AUTH_APPLE_ENABLED !== 'false',
-};
-export const supabase = authConfigured ? createClient(config.url, config.key, {
-  auth: { flowType: 'pkce', autoRefreshToken: true, persistSession: true, detectSessionInUrl: true },
-}) : null;
-
-export function authRedirect(recovery = false) {
-  return `${window.location.origin}/${recovery ? '?auth=recovery' : ''}`;
+export async function api(path, data, method = "POST", accountId) {
+  const response = await fetch(path, {
+    method: data === undefined ? "GET" : method,
+    credentials: "same-origin",
+    signal: AbortSignal.timeout(20000),
+    headers: {
+      ...(data === undefined ? {} : { "Content-Type": "application/json" }),
+      ...(accountId ? { "X-Pulse-Account": accountId } : {}),
+    },
+    body: data === undefined ? undefined : JSON.stringify(data),
+  });
+  let result;
+  try {
+    result = await response.json();
+  } catch {
+    throw new Error("connection_error");
+  }
+  if (!response.ok) {
+    const error = new Error(result.error || "server_error");
+    error.status = response.status;
+    throw error;
+  }
+  return result;
 }
-
 export function authError(error) {
-  const messages = {
-    invalid_credentials:'Неверный email или пароль.',
-    email_not_confirmed:'Подтверди email по ссылке из письма, затем войди.',
-    weak_password:'Этот пароль слишком простой. Выбери другой, не короче 10 символов.',
-    over_email_send_rate_limit:'Слишком много писем. Подожди немного и попробуй снова.',
-    over_request_rate_limit:'Слишком много попыток. Попробуй через несколько минут.',
-    user_already_exists:'Не удалось создать аккаунт. Попробуй войти или восстановить пароль.',
-    email_exists:'Не удалось создать аккаунт. Попробуй войти или восстановить пароль.',
-    signup_disabled:'Регистрация временно недоступна. Попробуй позже.',
-    provider_disabled:'Этот способ входа пока недоступен. Войди по email.',
-    validation_failed:'Проверь правильность email и пароля.',
-    same_password:'Новый пароль должен отличаться от прежнего.',
-    otp_expired:'Срок действия ссылки истёк. Запроси новое письмо.',
-  };
-  return messages[error?.code] || 'Не удалось выполнить запрос. Проверь подключение и попробуй ещё раз.';
+  return (
+    {
+      account_changed:
+        "В другом окне открыт другой аккаунт. Вернись в исходный аккаунт и повтори сохранение.",
+      invalid_credentials: "Неверный email или пароль.",
+      email_not_confirmed:
+        "Сначала подтверди email. Письмо можно отправить повторно.",
+      invalid_email: "Проверь адрес email.",
+      invalid_name: "Укажи имя до 24 символов.",
+      invalid_password: "Пароль должен содержать от 10 до 128 символов.",
+      invalid_token:
+        "Ссылка недействительна или уже использована. Запроси новую.",
+      rate_limit: "Слишком много попыток. Попробуй позже.",
+      email_unavailable: "Отправка писем пока недоступна. Попробуй позже.",
+      not_configured: "Вход пока не настроен. Попробуй позже.",
+      provider_unavailable: "Этот способ входа пока недоступен.",
+      account_exists:
+        "Этот email уже связан с аккаунтом. Используй первоначальный способ входа.",
+      oauth_failed: "Не удалось завершить вход. Попробуй ещё раз.",
+      unauthorized: "Сессия истекла. Войди снова.",
+      wrong_origin: "Адрес сайта не совпадает с настройками сервера.",
+      invalid_state: "Не удалось сохранить данные. Проверь значения и повтори.",
+    }[error?.message] ||
+    "Не удалось подключиться. Проверь соединение и попробуй снова."
+  );
 }

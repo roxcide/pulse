@@ -221,7 +221,7 @@ export function WeekSchedule({
         const date = addDays(start, i),
           today = dateKey(date) === dateKey(new Date()),
           done = history.some((h) => h.date === dateKey(date)),
-          rest = name === "Отдых";
+          rest = ["Отдых", "Не запланировано"].includes(name);
         return (
           <button
             className={`day-card ${today ? "current" : ""} ${rest ? "rest" : ""}`}
@@ -258,7 +258,11 @@ export function WeekSchedule({
                   Выполнено
                 </>
               ) : rest ? (
-                "Восстановление"
+                name === "Не запланировано" ? (
+                  "Добавить план"
+                ) : (
+                  "Восстановление"
+                )
               ) : (
                 "По плану"
               )}

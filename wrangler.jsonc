@@ -1,12 +1,25 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "pulse",
+  "main": "server/index.js",
   "compatibility_date": "2026-10-01",
-  "build": {
-    "command": "node ./node_modules/vite/bin/vite.js build",
-  },
+  "compatibility_flags": ["nodejs_compat"],
+  "build": { "command": "node ./node_modules/vite/bin/vite.js build" },
   "assets": {
+    "binding": "ASSETS",
     "directory": "./dist",
     "not_found_handling": "single-page-application",
+    "run_worker_first": ["/api/*"],
   },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "pulse-db",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations",
+    },
+  ],
+  "triggers": { "crons": ["0 3 * * *"] },
+  // После настройки Cloudflare Email Service добавь: "send_email": [{"name":"EMAIL"}]
+  // APP_ORIGIN и EMAIL_FROM задай как Worker secrets (см. DEPLOY.md).
 }
