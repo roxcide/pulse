@@ -1,4 +1,5 @@
 import { scrypt, timingSafeEqual } from "node:crypto";
+import { Buffer } from "node:buffer";
 
 export class HttpError extends Error {
   constructor(status, code) {
@@ -56,7 +57,7 @@ export function cookieName(env, type = "session") {
 }
 export function cookie(env, type, value, seconds = 604800) {
   const secure = origin(env).startsWith("https:");
-  return `${cookieName(env, type)}=${value}; Path=/; HttpOnly; SameSite=${type === "oauth" && secure ? "None" : "Lax"}; Max-Age=${seconds}${secure ? "; Secure" : ""}`;
+  return `${cookieName(env, type)}=${value}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${seconds}${secure ? "; Secure" : ""}`;
 }
 export function readCookie(request, env, type = "session") {
   const name = cookieName(env, type);

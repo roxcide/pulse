@@ -16,7 +16,8 @@ import {
   passwordMatches,
   limit,
 } from "./security.js";
-import { enabledProviders, oauthStart, oauthCallback } from "./oauth.js";
+import { oauthStart, oauthCallback } from "./oauth.js";
+import { authConfig, errorCode } from "./diagnostics.js";
 import { validateState } from "./state.js";
 
 const json = (data, status = 200, headers = {}) =>
@@ -54,48 +55,23 @@ async function sendLink(env, user, kind) {
 async function route(request, env) {
   const path = new URL(request.url).pathname,
     method = request.method;
-  if (path === "/api/auth/config" && method === "GET") {
-    let configured = Boolean(env.DB);
-    try {
-      origin(env);
-    } catch {
-      configured = false;
-    }
-    return json({
-      configured,
-      emailAvailable: configured && emailReady(env),
-      providers: configured
-        ? enabledProviders(env)
-        : { google: false, apple: false },
-    });
-  }
+  if (path === "/api/auth/config" && method === "GET")
+    return json(await authConfig(env));
   if (!env.DB) fail(503, "not_configured");
   const appOrigin = origin(env);
   if (new URL(request.url).origin !== appOrigin) fail(403, "wrong_origin");
-  const callback = path.match(/^\/api\/auth\/callback\/(google|apple)$/);
+  const callback = path.match(/^\/api\/auth\/callback\/(google)$/);
   if (
     !["GET", "HEAD"].includes(method) &&
-    !callback &&
     request.headers.get("Origin") !== appOrigin
   )
     fail(403, "wrong_origin");
-  if (callback && (method === "GET" || method === "POST")) {
+  if (callback && method === "GET") {
     if (Number(request.headers.get("content-length") || 0) > 16384)
       fail(413, "too_large");
-    try {
-      return await oauthCallback(request, env, callback[1]);
-    } catch (error) {
-      const code = error instanceof HttpError ? error.message : "oauth_failed";
-      return new Response(null, {
-        status: 303,
-        headers: {
-          Location: `${appOrigin}/?error=${encodeURIComponent(code)}`,
-          "Set-Cookie": cookie(env, "oauth", "", 0),
-        },
-      });
-    }
+    return oauthCallback(request, env, callback[1]);
   }
-  const oauth = path.match(/^\/api\/auth\/oauth\/(google|apple)$/);
+  const oauth = path.match(/^\/api\/auth\/oauth\/(google)$/);
   const ip = request.headers.get("CF-Connecting-IP") || "local";
   if (oauth && method === "GET") {
     await limit(env, `oauth:${ip}`, 30);
@@ -250,10 +226,46 @@ export default {
     try {
       response = await route(request, env);
     } catch (error) {
-      response = json(
-        { error: error instanceof HttpError ? error.message : "server_error" },
-        error instanceof HttpError ? error.status : 500,
-      );
+      const code = errorCode(error),
+        requestId = crypto.randomUUID(),
+        path = new URL(request.url).pathname;
+      if (!(error instanceof HttpError))
+        console.error(
+          JSON.stringify({
+            event: "auth_request_failed",
+            requestId,
+            path,
+            code,
+            type: error?.name || "Error",
+          }),
+        );
+      let redirectOrigin;
+      try {
+        redirectOrigin = origin(env);
+      } catch {
+        /* No trusted origin available. */
+      }
+      if (
+        redirectOrigin &&
+        /^\/api\/auth\/(oauth|callback)\/google$/.test(path)
+      ) {
+        response = new Response(null, {
+          status: 303,
+          headers: {
+            Location: redirectOrigin + "/?error=" + encodeURIComponent(code),
+            "Set-Cookie": cookie(env, "oauth", "", 0),
+          },
+        });
+      } else
+        response = json(
+          { error: code, requestId },
+          error instanceof HttpError
+            ? error.status
+            : code.startsWith("database_")
+              ? 503
+              : 500,
+        );
+      response.headers.set("X-Request-Id", requestId);
     }
     response.headers.set("Cache-Control", "no-store");
     response.headers.set("X-Content-Type-Options", "nosniff");

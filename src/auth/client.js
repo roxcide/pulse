@@ -25,6 +25,12 @@ export async function api(path, data, method = "POST", accountId) {
 export function authError(error) {
   return (
     {
+      database_not_initialized:
+        "Сервис входа ещё не подготовлен. Владелец сайта должен применить миграции базы данных.",
+      database_unavailable:
+        "Сервис хранения данных временно недоступен. Попробуй позже.",
+      server_error:
+        "Не удалось завершить запрос на сервере. Попробуй снова; если ошибка повторяется, сообщи владельцу сайта.",
       account_changed:
         "В другом окне открыт другой аккаунт. Вернись в исходный аккаунт и повтори сохранение.",
       invalid_credentials: "Неверный email или пароль.",
@@ -41,6 +47,8 @@ export function authError(error) {
       provider_unavailable: "Этот способ входа пока недоступен.",
       account_exists:
         "Этот email уже связан с аккаунтом. Используй первоначальный способ входа.",
+      google_configuration_error:
+        "Google отклонил настройки входа. Сообщи владельцу сайта: нужно проверить OAuth-клиент и адрес возврата.",
       oauth_failed: "Не удалось завершить вход. Попробуй ещё раз.",
       unauthorized: "Сессия истекла. Войди снова.",
       wrong_origin: "Адрес сайта не совпадает с настройками сервера.",

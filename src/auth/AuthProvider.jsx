@@ -22,11 +22,13 @@ export function AuthProvider({ children }) {
   }
   useEffect(() => {
     let alive = true;
-    Promise.all([api("/api/auth/config"), api("/api/auth/session")])
+    Promise.allSettled([api("/api/auth/config"), api("/api/auth/session")])
       .then(([settings, session]) => {
         if (alive) {
-          setConfig(settings);
-          setUser(session.user);
+          if (settings.status === "fulfilled") setConfig(settings.value);
+          else setError(authError(settings.reason));
+          if (session.status === "fulfilled") setUser(session.value.user);
+          else setError(authError(session.reason));
         }
       })
       .catch((err) => {

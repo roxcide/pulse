@@ -13,8 +13,8 @@ import {
 import { api, authError } from "./client";
 import { useAuth } from "./AuthProvider";
 
-function ProviderIcon({ provider }) {
-  return provider === "google" ? (
+function ProviderIcon() {
+  return (
     <svg width="20" height="20" viewBox="0 0 24 24" aria-hidden="true">
       <path
         fill="#4285F4"
@@ -32,16 +32,6 @@ function ProviderIcon({ provider }) {
         fill="#EA4335"
         d="M12 5.96c1.47 0 2.79.51 3.83 1.51l2.87-2.87A9.6 9.6 0 0 0 12 2a10 10 0 0 0-8.94 5.49l3.34 2.59A5.99 5.99 0 0 1 12 5.96Z"
       />
-    </svg>
-  ) : (
-    <svg
-      width="20"
-      height="22"
-      viewBox="0 0 24 24"
-      fill="currentColor"
-      aria-hidden="true"
-    >
-      <path d="M17.1 12.5c0-2 1.6-3 1.7-3.1-1-1.5-2.6-1.7-3.2-1.7-1.4-.2-2.7.8-3.4.8-.7 0-1.8-.8-2.9-.8C7.8 7.7 6.4 8.6 5.7 10c-1.5 2.6-.4 6.5 1 8.6.7 1 1.5 2.1 2.6 2.1 1 0 1.5-.7 2.9-.7 1.3 0 1.7.7 2.9.7 1.2 0 1.9-1 2.6-2 .8-1.2 1.1-2.3 1.1-2.4-.1 0-2.7-1-2.7-3.8ZM14.7 6.3c.6-.8 1.1-1.9 1-3-.9.1-2 .6-2.7 1.4-.6.7-1.2 1.8-1 2.9 1 .1 2.1-.5 2.7-1.3Z" />
     </svg>
   );
 }
@@ -218,14 +208,19 @@ export default function AuthScreen({ initialError = "" }) {
           <p className="auth-subtitle">{subtitles[mode]}</p>
           {!config.configured && (
             <div className="auth-notice" role="status">
-              Вход пока недоступен. Попробуй зайти немного позже.
+              {config.checks?.database === "missing_schema"
+                ? "Сервис входа ещё не подготовлен. Владелец сайта должен завершить настройку базы."
+                : "Не удалось подключить сервис входа. Обнови страницу или попробуй позже."}
             </div>
           )}
           {config.configured &&
             !config.emailAvailable &&
             ["register", "reset"].includes(mode) && (
               <div className="auth-notice" role="status">
-                Регистрация и восстановление по email пока недоступны.
+                Отправка писем ещё не подключена.{" "}
+                {config.providers.google
+                  ? "Создать аккаунт и войти можно через Google."
+                  : "Регистрация по email станет доступна после настройки почты."}
               </div>
             )}
           {error && (
@@ -241,24 +236,19 @@ export default function AuthScreen({ initialError = "" }) {
           {["login", "register"].includes(mode) && (
             <>
               <div className="oauth-buttons">
-                {["google", "apple"].map((provider) => (
-                  <button
-                    className="oauth-button"
-                    key={provider}
-                    disabled={busy || !config.providers[provider]}
-                    onClick={() => {
-                      window.location.assign("/api/auth/oauth/" + provider);
-                    }}
-                  >
-                    <ProviderIcon provider={provider} />
-                    <span>
-                      Продолжить с {provider === "google" ? "Google" : "Apple"}
-                      {!config.providers[provider] && (
-                        <small>Пока недоступно</small>
-                      )}
-                    </span>
-                  </button>
-                ))}
+                <button
+                  className="oauth-button"
+                  disabled={busy || !config.providers.google}
+                  onClick={() => {
+                    window.location.assign("/api/auth/oauth/google");
+                  }}
+                >
+                  <ProviderIcon />
+                  <span>
+                    Продолжить с Google
+                    {!config.providers.google && <small>Пока недоступно</small>}
+                  </span>
+                </button>
               </div>
               <div className="auth-divider">
                 <span>или по email</span>

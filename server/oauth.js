@@ -1,4 +1,5 @@
-import { createRemoteJWKSet, jwtVerify, SignJWT, importPKCS8 } from "jose";
+import { Buffer } from "node:buffer";
+import { createRemoteJWKSet, jwtVerify } from "jose";
 import {
   fail,
   randomToken,
@@ -8,7 +9,6 @@ import {
   origin,
   newSession,
   emailValue,
-  requestText,
 } from "./security.js";
 
 const providers = {
@@ -20,20 +20,10 @@ const providers = {
       new URL("https://www.googleapis.com/oauth2/v3/certs"),
     ),
   },
-  apple: {
-    authorize: "https://appleid.apple.com/auth/authorize",
-    token: "https://appleid.apple.com/auth/token",
-    issuer: "https://appleid.apple.com",
-    jwks: createRemoteJWKSet(new URL("https://appleid.apple.com/auth/keys")),
-  },
 };
 export const enabledProviders = (env) => ({
-  google: Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET),
-  apple: Boolean(
-    env.APPLE_CLIENT_ID &&
-    env.APPLE_TEAM_ID &&
-    env.APPLE_KEY_ID &&
-    env.APPLE_PRIVATE_KEY,
+  google: Boolean(
+    env.GOOGLE_CLIENT_ID?.trim() && env.GOOGLE_CLIENT_SECRET?.trim(),
   ),
 });
 export async function oauthStart(request, env, provider) {
@@ -54,19 +44,19 @@ export async function oauthStart(request, env, provider) {
     .run();
   const url = new URL(providers[provider].authorize);
   const params = {
-    client_id: env[`${provider.toUpperCase()}_CLIENT_ID`],
+    client_id: env.GOOGLE_CLIENT_ID.trim(),
     redirect_uri: `${origin(env)}/api/auth/callback/${provider}`,
     response_type: "code",
-    scope: provider === "google" ? "openid email profile" : "name email",
+    scope: "openid email profile",
     state,
     nonce,
   };
-  if (provider === "google") {
+  {
     params.code_challenge = Buffer.from(
       await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)),
     ).toString("base64url");
     params.code_challenge_method = "S256";
-  } else params.response_mode = "form_post";
+  }
   url.search = new URLSearchParams(params).toString();
   return new Response(null, {
     status: 302,
@@ -78,10 +68,7 @@ export async function oauthStart(request, env, provider) {
 }
 export async function oauthCallback(request, env, provider) {
   if (!enabledProviders(env)[provider]) fail(503, "provider_unavailable");
-  const input =
-    request.method === "POST"
-      ? new URLSearchParams(await requestText(request))
-      : new URL(request.url).searchParams;
+  const input = new URL(request.url).searchParams;
   const state = input.get("state"),
     browser = readCookie(request, env, "oauth");
   if (!state || !browser) fail(400, "oauth_failed");
@@ -92,40 +79,39 @@ export async function oauthCallback(request, env, provider) {
     .first();
   if (!saved || input.has("error") || !input.get("code"))
     fail(400, "oauth_failed");
-  let secret = env.GOOGLE_CLIENT_SECRET;
-  if (provider === "apple") {
-    secret = await new SignJWT({})
-      .setProtectedHeader({ alg: "ES256", kid: env.APPLE_KEY_ID })
-      .setIssuer(env.APPLE_TEAM_ID)
-      .setAudience("https://appleid.apple.com")
-      .setSubject(env.APPLE_CLIENT_ID)
-      .setIssuedAt()
-      .setExpirationTime("5m")
-      .sign(
-        await importPKCS8(env.APPLE_PRIVATE_KEY.replace(/\\n/g, "\n"), "ES256"),
-      );
-  }
   const response = await fetch(providers[provider].token, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       grant_type: "authorization_code",
       code: input.get("code"),
-      client_id: env[`${provider.toUpperCase()}_CLIENT_ID`],
-      client_secret: secret,
+      client_id: env.GOOGLE_CLIENT_ID.trim(),
+      client_secret: env.GOOGLE_CLIENT_SECRET.trim(),
       redirect_uri: `${origin(env)}/api/auth/callback/${provider}`,
-      ...(provider === "google" ? { code_verifier: saved.verifier } : {}),
+      code_verifier: saved.verifier,
     }),
     signal: AbortSignal.timeout(15000),
   });
-  if (!response.ok) fail(400, "oauth_failed");
+  if (!response.ok) {
+    const failure = await response.json().catch(() => ({}));
+    fail(
+      400,
+      [
+        "invalid_client",
+        "unauthorized_client",
+        "redirect_uri_mismatch",
+      ].includes(failure.error)
+        ? "google_configuration_error"
+        : "oauth_failed",
+    );
+  }
   const tokens = await response.json();
   const { payload } = await jwtVerify(
     tokens.id_token,
     providers[provider].jwks,
     {
       issuer: providers[provider].issuer,
-      audience: env[`${provider.toUpperCase()}_CLIENT_ID`],
+      audience: env.GOOGLE_CLIENT_ID.trim(),
       algorithms: ["RS256"],
       requiredClaims: ["sub", "exp", "iat", "nonce"],
     },
@@ -148,18 +134,7 @@ export async function oauthCallback(request, env, provider) {
         .first()
     )
       fail(409, "account_exists");
-    let name = payload.name || email.split("@")[0];
-    if (provider === "apple" && input.get("user")) {
-      try {
-        const data = JSON.parse(input.get("user"));
-        name =
-          [data.name?.firstName, data.name?.lastName]
-            .filter(Boolean)
-            .join(" ") || name;
-      } catch {
-        /* Optional Apple display name. */
-      }
-    }
+    const name = payload.name || email.split("@")[0];
     user = {
       id: crypto.randomUUID(),
       email,

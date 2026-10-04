@@ -4,6 +4,7 @@
   "main": "server/index.js",
   "compatibility_date": "2026-10-01",
   "compatibility_flags": ["nodejs_compat"],
+  "keep_vars": true,
   "build": { "command": "node ./node_modules/vite/bin/vite.js build" },
   "assets": {
     "binding": "ASSETS",
@@ -19,6 +20,6 @@
     },
   ],
   "triggers": { "crons": ["0 3 * * *"] },
-  // После настройки Cloudflare Email Service добавь: "send_email": [{"name":"EMAIL"}]
+  "send_email": [{ "name": "EMAIL" }],
   // APP_ORIGIN и EMAIL_FROM задай как Worker secrets (см. DEPLOY.md).
 }

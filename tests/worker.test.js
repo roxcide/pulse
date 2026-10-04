@@ -366,16 +366,14 @@ describe("Cloudflare account API", () => {
     );
   });
   it("uses one-time OAuth state even when consent is cancelled", async () => {
-    env.APPLE_CLIENT_ID = "service";
-    env.APPLE_TEAM_ID = "team";
-    env.APPLE_KEY_ID = "key";
-    env.APPLE_PRIVATE_KEY = "not-used";
-    const start = await call("/api/auth/oauth/apple");
+    env.GOOGLE_CLIENT_ID = "client";
+    env.GOOGLE_CLIENT_SECRET = "secret";
+    const start = await call("/api/auth/oauth/google");
     const url = new URL(start.headers.get("location"));
-    expect(url.searchParams.get("response_mode")).toBe("form_post");
-    expect(start.headers.get("set-cookie")).toContain("SameSite=None");
+    expect(url.searchParams.get("response_type")).toBe("code");
+    expect(start.headers.get("set-cookie")).toContain("SameSite=Lax");
     await call(
-      "/api/auth/callback/apple?state=" +
+      "/api/auth/callback/google?state=" +
         url.searchParams.get("state") +
         "&error=access_denied",
       undefined,
@@ -391,7 +389,9 @@ describe("Cloudflare account API", () => {
       false,
     );
     expect((await register()).status).toBe(503);
-    expect((await call("/api/auth/oauth/google")).status).toBe(503);
+    expect(
+      (await call("/api/auth/oauth/google")).headers.get("location"),
+    ).toContain("error=provider_unavailable");
   });
 });
 
@@ -452,5 +452,99 @@ it("never silently links a Google identity by matching an existing email", async
   expect(response.headers.get("location")).toContain("error=account_exists");
   expect(
     env.DB.raw.prepare("SELECT count(*) AS n FROM identities").get().n,
+  ).toBe(0);
+});
+
+it("reports missing D1 tables instead of declaring authentication ready", async () => {
+  env.DB.raw.exec("DROP TABLE oauth_states");
+  const config = await (await call("/api/auth/config")).json();
+  expect(config.configured).toBe(false);
+  expect(config.checks.database).toBe("missing_schema");
+  expect(config.providers.google).toBe(false);
+});
+it("returns an actionable page redirect when OAuth cannot store state", async () => {
+  vi.spyOn(console, "error").mockImplementation(() => {});
+  env.GOOGLE_CLIENT_ID = "client";
+  env.GOOGLE_CLIENT_SECRET = "secret";
+  env.DB.raw.exec("DROP TABLE oauth_states");
+  const response = await call("/api/auth/oauth/google");
+  expect(response.status).toBe(303);
+  expect(response.headers.get("location")).toBe(
+    env.APP_ORIGIN + "/?error=database_not_initialized",
+  );
+  expect(response.headers.get("x-request-id")).toBeTruthy();
+});
+it("does not require a global Buffer to begin Google authentication", async () => {
+  env.GOOGLE_CLIENT_ID = "client";
+  env.GOOGLE_CLIENT_SECRET = "secret";
+  vi.stubGlobal("Buffer", undefined);
+  const response = await call("/api/auth/oauth/google");
+  expect(response.status).toBe(302);
+});
+it("does not expose Apple endpoints or capabilities", async () => {
+  const config = await (await call("/api/auth/config")).json();
+  expect(config.providers).not.toHaveProperty("apple");
+  expect((await call("/api/auth/oauth/apple")).status).toBe(404);
+});
+it("reports email prerequisites without exposing credentials", async () => {
+  delete env.EMAIL;
+  let config = await (await call("/api/auth/config")).json();
+  expect(config.checks.email).toBe("missing_binding");
+  expect(config.configured).toBe(true);
+  env.EMAIL = { send: async () => {} };
+  delete env.EMAIL_FROM;
+  config = await (await call("/api/auth/config")).json();
+  expect(config.checks.email).toBe("missing_sender");
+  expect(config.emailAvailable).toBe(false);
+});
+it("logs safe error identifiers without request passwords or tokens", async () => {
+  const logged = vi.spyOn(console, "error").mockImplementation(() => {});
+  env.DB.prepare = () => {
+    throw new Error("D1_ERROR: database unavailable secret-example");
+  };
+  const response = await call("/api/auth/login", {
+    email: "private@example.com",
+    password: "private-password",
+  });
+  expect(response.status).toBe(503);
+  expect((await response.json()).error).toBe("database_unavailable");
+  expect(JSON.stringify(logged.mock.calls)).not.toMatch(
+    /secret-example|private-password|private@example.com/,
+  );
+});
+
+it("can apply the bootstrap SQL repeatedly without losing existing accounts", async () => {
+  await register();
+  const migration = readFileSync(
+    new URL("../migrations/0001_auth.sql", import.meta.url),
+    "utf8",
+  );
+  env.DB.raw.exec(migration);
+  env.DB.raw.exec(migration);
+  expect(env.DB.raw.prepare("SELECT count(*) AS n FROM users").get().n).toBe(1);
+  expect((await (await call("/api/auth/config")).json()).checks.database).toBe(
+    "ready",
+  );
+});
+it("reuses a Google account on subsequent logins without email sending", async () => {
+  delete env.EMAIL;
+  const first = await googleCallback();
+  expect(first.status).toBe(303);
+  const id = env.DB.raw.prepare("SELECT id FROM users").get().id;
+  const second = await googleCallback();
+  expect(second.headers.get("location")).toBe(env.APP_ORIGIN + "/#dashboard");
+  expect(env.DB.raw.prepare("SELECT count(*) AS n FROM users").get().n).toBe(1);
+  expect(env.DB.raw.prepare("SELECT id FROM users").get().id).toBe(id);
+});
+it("keeps email accounts unverified when the delivery service rejects the message", async () => {
+  env.EMAIL.send = async () => {
+    throw new Error("sender not verified");
+  };
+  expect((await register()).status).toBe(503);
+  expect(
+    env.DB.raw.prepare("SELECT email_verified FROM users").get().email_verified,
+  ).toBe(0);
+  expect(
+    env.DB.raw.prepare("SELECT count(*) AS n FROM email_tokens").get().n,
   ).toBe(0);
 });

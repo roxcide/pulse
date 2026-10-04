@@ -31,7 +31,7 @@ beforeEach(() => {
         return Response.json({
           configured: true,
           emailAvailable: true,
-          providers: { google: false, apple: false },
+          providers: { google: false },
         });
       if (path === "/api/auth/session") return Response.json({ user: session });
       if (path === "/api/auth/login") {
@@ -88,6 +88,7 @@ it("logs in through the server and ignores legacy browser demo data", async () =
   const user = userEvent.setup();
   const { container } = app();
   await screen.findByRole("heading", { name: "С возвращением." });
+  expect(screen.queryByRole("button", { name: /Apple/ })).toBeNull();
   expect(
     screen.getByRole("button", { name: /Продолжить с Google/ }).disabled,
   ).toBe(true);
@@ -189,4 +190,67 @@ it("requires an explicit click to consume an email verification token", async ()
     token: "test-token",
   });
   expect(location.hash).toBe("");
+});
+
+it("keeps Google available when only password email delivery is missing", async () => {
+  const original = fetch;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((path, options) =>
+      path === "/api/auth/config"
+        ? Promise.resolve(
+            Response.json({
+              configured: true,
+              emailAvailable: false,
+              providers: { google: true },
+              checks: {
+                database: "ready",
+                origin: "ready",
+                email: "missing_binding",
+              },
+            }),
+          )
+        : original(path, options),
+    ),
+  );
+  app();
+  await screen.findByRole("heading", { name: "С возвращением." });
+  await userEvent.click(
+    screen.getByRole("button", { name: /Зарегистрироваться/ }),
+  );
+  expect(screen.queryByRole("button", { name: /Apple/ })).toBeNull();
+  expect(
+    screen.getByRole("button", { name: /Продолжить с Google/ }).disabled,
+  ).toBe(false);
+  expect(screen.getByRole("button", { name: "Создать аккаунт" }).disabled).toBe(
+    true,
+  );
+  expect(screen.getByRole("status").textContent).toContain(
+    "Создать аккаунт и войти можно через Google",
+  );
+});
+it("retains provider configuration when session restoration fails", async () => {
+  const original = fetch;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn((path, options) =>
+      path === "/api/auth/config"
+        ? Promise.resolve(
+            Response.json({
+              configured: true,
+              emailAvailable: true,
+              providers: { google: true },
+            }),
+          )
+        : path === "/api/auth/session"
+          ? Promise.reject(new Error("server_error"))
+          : original(path, options),
+    ),
+  );
+  app();
+  await screen.findByRole("heading", { name: "С возвращением." });
+  expect(
+    screen.getByRole("button", { name: /Продолжить с Google/ }).disabled,
+  ).toBe(false);
+  expect(screen.getByRole("alert").textContent).toContain("сервере");
 });
