@@ -1,5 +1,6 @@
 import { HttpError, origin } from "./security.js";
 import { enabledProviders } from "./oauth.js";
+import { mailReady } from "./mail.js";
 
 export function errorCode(error) {
   if (error instanceof HttpError) return error.message;
@@ -18,6 +19,7 @@ export async function authConfig(env) {
   const checks = {
     origin: "ready",
     database: "ready",
+    email: mailReady(env) ? "ready" : "not_configured",
   };
   try {
     origin(env);
@@ -46,7 +48,8 @@ export async function authConfig(env) {
   const configured = checks.origin === "ready" && checks.database === "ready";
   return {
     configured,
-    passwordRegistration: configured,
+    passwordRegistration: configured && mailReady(env),
+    passwordRecovery: configured && mailReady(env),
     providers: { google: configured && enabledProviders(env).google },
     checks,
   };

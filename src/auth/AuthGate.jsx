@@ -5,7 +5,8 @@ import { useAuth } from "./AuthProvider";
 import { UserDataProvider, GuestDataProvider } from "../state/UserDataProvider";
 import { LoaderCircle } from "lucide-react";
 export default function AuthGate() {
-  const { user, isGuest, loading, error, enterGuest } = useAuth();
+  const { user, isGuest, loading, error, enterGuest, emailAction } = useAuth();
+  if (emailAction) return <AuthScreen initialError={error} />;
   if (isGuest)
     return (
       <GuestDataProvider user={user}>

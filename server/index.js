@@ -18,6 +18,8 @@ import {
 import { oauthStart, oauthCallback } from "./oauth.js";
 import { authConfig, errorCode } from "./diagnostics.js";
 import { validateState } from "./state.js";
+import { requireMail, sendAuthMail } from "./mail.js";
+import { emailAuth } from "./email-auth.js";
 
 const json = (data, status = 200, headers = {}) =>
   Response.json(data, { status, headers });
@@ -91,7 +93,10 @@ async function route(request, env) {
   if (method !== "POST") fail(404, "not_found");
   const data = await body(request);
   await limit(env, `auth:${ip}`, 30);
+  const emailResult = await emailAuth(path, data, env);
+  if (emailResult) return json(emailResult);
   if (path === "/api/auth/register") {
+    requireMail(env);
     const email = emailValue(data.email);
     checkPassword(data.password);
     if (
@@ -107,7 +112,6 @@ async function route(request, env) {
       .bind(email)
       .first();
     if (existing) fail(409, "account_exists");
-    // Email is a login identifier, not proof of mailbox ownership.
     const user = await env.DB.prepare(
       "INSERT INTO users(id,email,display_name,password_hash,created_at) VALUES(?,?,?,?,?) ON CONFLICT(email) DO NOTHING RETURNING *",
     )
@@ -120,9 +124,8 @@ async function route(request, env) {
       )
       .first();
     if (!user) fail(409, "account_exists");
-    return json({ user: safeUser(user) }, 201, {
-      "Set-Cookie": await newSession(env, user),
-    });
+    await sendAuthMail(env, user, "verify");
+    return json({ ok: true, verificationRequired: true }, 201);
   }
   if (path === "/api/auth/login") {
     const email = emailValue(data.email);
@@ -134,6 +137,7 @@ async function route(request, env) {
       .first();
     if (!(await passwordMatches(data.password, user?.password_hash)))
       fail(401, "invalid_credentials");
+    if (!user.email_verified) fail(403, "email_not_confirmed");
     return json({ user: safeUser(user) }, 200, {
       "Set-Cookie": await newSession(env, user),
     });

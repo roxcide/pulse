@@ -12,6 +12,24 @@ function readGuestMode() {
 }
 export const useAuth = () => useContext(AuthContext);
 export function AuthProvider({ children }) {
+  const [emailAction, setEmailAction] = useState(() => {
+    const mode = new URLSearchParams(location.search).get("auth");
+    return ["verify", "recovery"].includes(mode)
+      ? {
+          mode,
+          token: new URLSearchParams(location.hash.slice(1)).get("token") || "",
+        }
+      : null;
+  });
+  function finishEmailAction() {
+    setGuest(false);
+    setUser(null);
+    try {
+      localStorage.removeItem(guestKey);
+    } catch {}
+    setEmailAction(null);
+    window.history.replaceState({}, "", location.pathname);
+  }
   const [isGuest, setGuest] = useState(readGuestMode);
   const [user, setUser] = useState(null),
     [loading, setLoading] = useState(true),
@@ -24,8 +42,15 @@ export function AuthProvider({ children }) {
   async function reloadSession() {
     const result = await api("/api/auth/session");
     setUser(result.user);
+    if (result.user) {
+      setGuest(false);
+      try {
+        localStorage.removeItem(guestKey);
+      } catch {}
+    }
   }
   function enterGuest() {
+    setEmailAction(null);
     try {
       localStorage.setItem(guestKey, "true");
     } catch {
@@ -48,7 +73,7 @@ export function AuthProvider({ children }) {
     window.history.replaceState({}, "", location.pathname);
   }
   useEffect(() => {
-    if (isGuest) {
+    if (isGuest && !emailAction) {
       setLoading(false);
       return;
     }
@@ -71,12 +96,14 @@ export function AuthProvider({ children }) {
     return () => {
       alive = false;
     };
-  }, [isGuest]);
+  }, [isGuest, emailAction]);
   return (
     <AuthContext.Provider
       value={{
         user: isGuest ? guestUser : user,
         isGuest,
+        emailAction,
+        finishEmailAction,
         enterGuest,
         loading,
         config,

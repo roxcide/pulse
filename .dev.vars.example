@@ -3,3 +3,7 @@ APP_ORIGIN="http://localhost:8787"
 # Для локальной разработки через Vite вместо этого: http://localhost:5173
 # GOOGLE_CLIENT_ID=""
 # GOOGLE_CLIENT_SECRET=""
+
+# Brevo: реальные значения храни только в .dev.vars / Worker Secrets
+# BREVO_API_KEY=""
+EMAIL_FROM="noreply@pulser.pp.ua"

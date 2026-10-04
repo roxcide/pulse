@@ -36,25 +36,31 @@ function ProviderIcon() {
 }
 
 export default function AuthScreen({ initialError = "" }) {
-  const { config, reloadSession, enterGuest } = useAuth();
-  const [mode, setMode] = useState("login");
+  const { config, reloadSession, enterGuest, emailAction, finishEmailAction } =
+    useAuth();
+  const [mode, setMode] = useState(
+    emailAction?.mode === "recovery" ? "update" : emailAction?.mode || "login",
+  );
   const [busy, setBusy] = useState(false),
     [visible, setVisible] = useState(false);
   const [error, setError] = useState(initialError),
     [email, setEmail] = useState("");
+  const [notice, setNotice] = useState("");
+  const [cooldown, setCooldown] = useState(0);
+  useEffect(() => {
+    if (!cooldown) return;
+    const timer = setTimeout(() => setCooldown(cooldown - 1), 1000);
+    return () => clearTimeout(timer);
+  }, [cooldown]);
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const code = params.get("error");
     if (code) setError(authError(new Error(code)));
-    if (["verify", "recovery"].includes(params.get("auth"))) {
-      setError(
-        "Ссылки из писем больше не используются. Войди с паролем своего аккаунта.",
-      );
-      window.history.replaceState({}, "", location.pathname);
-    }
+    if (emailAction) window.history.replaceState({}, "", location.pathname);
   }, []);
   const changeMode = (next) => {
     setMode(next);
+    setNotice("");
     setError("");
     setVisible(false);
     window.history.replaceState({}, "", location.pathname);
@@ -64,35 +70,89 @@ export default function AuthScreen({ initialError = "" }) {
     setError("");
     const form = new FormData(event.currentTarget);
     const password = String(form.get("password") || "");
-    if (mode === "register" && password !== form.get("confirm")) {
+    if (
+      ["register", "update"].includes(mode) &&
+      password !== form.get("confirm")
+    ) {
       setError("Пароли не совпадают.");
       return;
     }
     setBusy(true);
     try {
-      await api(
-        mode === "register" ? "/api/auth/register" : "/api/auth/login",
-        {
-          email,
-          password,
-          ...(mode === "register" ? { name: form.get("name") } : {}),
-        },
-      );
-      window.history.replaceState({}, "", location.pathname + "#dashboard");
-      await reloadSession();
+      const routes = {
+        login: "login",
+        register: "register",
+        reset: "reset",
+        confirm: "resend",
+        verify: "verify",
+        update: "update-password",
+      };
+      await api("/api/auth/" + routes[mode], {
+        email,
+        password,
+        ...(mode === "register" ? { name: form.get("name") } : {}),
+        ...(["verify", "update"].includes(mode)
+          ? { token: emailAction?.token || "" }
+          : {}),
+      });
+      if (mode === "login") {
+        window.history.replaceState({}, "", location.pathname + "#dashboard");
+        await reloadSession();
+      } else if (mode === "register" || mode === "confirm") {
+        setMode("confirm");
+        setNotice(
+          "Если аккаунту требуется подтверждение, письмо отправлено. Проверь входящие и спам.",
+        );
+        setCooldown(60);
+      } else if (mode === "reset") {
+        setNotice(
+          "Если для этого email есть аккаунт с паролем, мы отправили ссылку для восстановления. Проверь входящие и спам.",
+        );
+        setCooldown(60);
+      } else {
+        setMode("done");
+        setNotice(
+          mode === "verify"
+            ? "Почта подтверждена. Теперь можно войти в аккаунт."
+            : "Пароль изменён. Войди с новым паролем.",
+        );
+      }
     } catch (err) {
       setError(authError(err));
+      if (
+        err.message === "email_not_confirmed" ||
+        (mode === "register" &&
+          ["email_unavailable", "email_configuration_error"].includes(
+            err.message,
+          ))
+      )
+        setMode("confirm");
     } finally {
       setBusy(false);
     }
   }
-  const titles = { login: "С возвращением.", register: "Твой первый шаг." };
+  const titles = {
+    login: "С возвращением.",
+    register: "Твой первый шаг.",
+    reset: "Забыл пароль?",
+    confirm: "Проверь почту.",
+    verify: "Подтверди почту.",
+    update: "Новый пароль.",
+    done: "Готово.",
+  };
   const subtitles = {
+    reset: "Отправим ссылку для восстановления доступа.",
+    confirm: "Открой ссылку из письма. Она действует 24 часа.",
+    verify: "Введи пароль, который ты указал при регистрации.",
+    update: "Придумай новый пароль — от 10 символов.",
+    done: "Продолжай свой путь к цели.",
     login: "Войди, чтобы продолжить свой путь к цели.",
     register: "Создай аккаунт. Твоя история начинается с тебя.",
   };
   const allowed =
-    config.configured && (mode === "login" || config.passwordRegistration);
+    config.configured &&
+    (!["register", "reset", "confirm"].includes(mode) ||
+      config.passwordRegistration);
   return (
     <div className="auth-page">
       <section className="auth-story">
@@ -144,11 +204,24 @@ export default function AuthScreen({ initialError = "" }) {
           <span className="eyebrow">ТВОЁ ЛИЧНОЕ ПРОСТРАНСТВО</span>
           <h2>{titles[mode]}</h2>
           <p className="auth-subtitle">{subtitles[mode]}</p>
+          {config.configured &&
+            !config.passwordRegistration &&
+            ["register", "reset", "confirm"].includes(mode) && (
+              <div className="auth-notice" role="status">
+                Отправка писем пока недоступна. Попробуй позже или продолжи
+                через Google.
+              </div>
+            )}
           {!config.configured && (
             <div className="auth-notice" role="status">
               {config.checks?.database === "missing_schema"
                 ? "Сервис входа ещё не подготовлен. Владелец сайта должен завершить настройку базы."
                 : "Не удалось подключить сервис входа. Обнови страницу или попробуй позже."}
+            </div>
+          )}
+          {notice && (
+            <div className="auth-notice" role="status">
+              {notice}
             </div>
           )}
           {error && (
@@ -178,87 +251,123 @@ export default function AuthScreen({ initialError = "" }) {
               </div>
             </>
           )}
-          <form key={mode} onSubmit={submit} className="auth-form">
-            <fieldset disabled={busy}>
-              {mode === "register" && (
-                <label className="form-field">
-                  Как тебя зовут
-                  <input
-                    name="name"
-                    autoComplete="given-name"
-                    placeholder="Твоё имя"
-                    maxLength={24}
-                    required
-                  />
-                </label>
-              )}
-              <label className="form-field">
-                Email
-                <input
-                  name="email"
-                  type="email"
-                  autoComplete="email"
-                  placeholder="you@example.com"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  required
-                  maxLength={254}
-                />
-              </label>
+          {mode !== "done" && (
+            <form key={mode} onSubmit={submit} className="auth-form">
+              <fieldset disabled={busy}>
+                {mode === "register" && (
+                  <label className="form-field">
+                    Как тебя зовут
+                    <input
+                      name="name"
+                      autoComplete="given-name"
+                      placeholder="Твоё имя"
+                      maxLength={24}
+                      required
+                    />
+                  </label>
+                )}
+                {!["verify", "update"].includes(mode) && (
+                  <label className="form-field">
+                    Email
+                    <input
+                      name="email"
+                      type="email"
+                      autoComplete="email"
+                      placeholder="you@example.com"
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      required
+                      maxLength={254}
+                    />
+                  </label>
+                )}
 
-              <label className="form-field">
-                <span className="password-label">Пароль</span>
-                <div className="password-field">
-                  <input
-                    name="password"
-                    aria-label="Пароль"
-                    type={visible ? "text" : "password"}
-                    autoComplete={
-                      mode === "login" ? "current-password" : "new-password"
-                    }
-                    placeholder={
-                      mode === "login" ? "Введи пароль" : "Не менее 10 символов"
-                    }
-                    minLength={mode === "login" ? 1 : 10}
-                    maxLength={128}
-                    required
-                  />
-                  <button
-                    type="button"
-                    className="icon-button"
-                    aria-label={visible ? "Скрыть пароль" : "Показать пароль"}
-                    aria-pressed={visible}
-                    onClick={() => setVisible((v) => !v)}
-                  >
-                    {visible ? <EyeOff size={18} /> : <Eye size={18} />}
-                  </button>
-                </div>
-              </label>
-              {mode !== "login" && (
-                <label className="form-field">
-                  Повтори пароль
-                  <input
-                    name="confirm"
-                    type={visible ? "text" : "password"}
-                    autoComplete="new-password"
-                    placeholder="Ещё раз, чтобы не ошибиться"
-                    minLength={10}
-                    maxLength={128}
-                    required
-                  />
-                </label>
-              )}
-              <button
-                className="primary-button auth-submit"
-                disabled={!allowed}
-                type="submit"
-              >
-                {busy ? <LoaderCircle size={18} className="spinning" /> : null}
-                {mode === "login" ? "Войти" : "Создать аккаунт"}
-                {!busy && <ArrowRight size={18} />}
+                {!["reset", "confirm"].includes(mode) && (
+                  <label className="form-field">
+                    <span className="password-label">Пароль</span>
+                    <div className="password-field">
+                      <input
+                        name="password"
+                        aria-label="Пароль"
+                        type={visible ? "text" : "password"}
+                        autoComplete={
+                          ["login", "verify"].includes(mode)
+                            ? "current-password"
+                            : "new-password"
+                        }
+                        placeholder={
+                          mode === "login"
+                            ? "Введи пароль"
+                            : "Не менее 10 символов"
+                        }
+                        minLength={mode === "login" ? 1 : 10}
+                        maxLength={128}
+                        required
+                      />
+                      <button
+                        type="button"
+                        className="icon-button"
+                        aria-label={
+                          visible ? "Скрыть пароль" : "Показать пароль"
+                        }
+                        aria-pressed={visible}
+                        onClick={() => setVisible((v) => !v)}
+                      >
+                        {visible ? <EyeOff size={18} /> : <Eye size={18} />}
+                      </button>
+                    </div>
+                  </label>
+                )}
+                {["register", "update"].includes(mode) && (
+                  <label className="form-field">
+                    Повтори пароль
+                    <input
+                      name="confirm"
+                      type={visible ? "text" : "password"}
+                      autoComplete="new-password"
+                      placeholder="Ещё раз, чтобы не ошибиться"
+                      minLength={10}
+                      maxLength={128}
+                      required
+                    />
+                  </label>
+                )}
+                <button
+                  className="primary-button auth-submit"
+                  disabled={
+                    !allowed ||
+                    (["reset", "confirm"].includes(mode) && cooldown > 0)
+                  }
+                  type="submit"
+                >
+                  {busy ? (
+                    <LoaderCircle size={18} className="spinning" />
+                  ) : null}
+                  {
+                    {
+                      login: "Войти",
+                      register: "Создать аккаунт",
+                      reset: "Отправить ссылку",
+                      confirm: "Отправить письмо ещё раз",
+                      verify: "Подтвердить почту",
+                      update: "Сохранить пароль",
+                    }[mode]
+                  }
+                  {["reset", "confirm"].includes(mode) &&
+                    cooldown > 0 &&
+                    ` (${cooldown} с)`}
+                  {!busy && <ArrowRight size={18} />}
+                </button>
+              </fieldset>
+            </form>
+          )}
+          {["login", "verify", "confirm"].includes(mode) && (
+            <p className="auth-switch">
+              <button disabled={busy} onClick={() => changeMode("reset")}>
+                Не помню пароль
               </button>
-            </fieldset>
-          </form>
+            </p>
+          )}
           {mode === "login" ? (
             <p className="auth-switch">
               Ещё нет аккаунта?{" "}
@@ -270,14 +379,20 @@ export default function AuthScreen({ initialError = "" }) {
           ) : (
             <p className="auth-switch">
               Уже с нами?{" "}
-              <button disabled={busy} onClick={() => changeMode("login")}>
+              <button
+                disabled={busy}
+                onClick={() => {
+                  changeMode("login");
+                  finishEmailAction();
+                }}
+              >
                 Войти
               </button>
             </p>
           )}
           {mode === "register" && (
             <p className="auth-privacy">
-              Сохрани пароль: восстановление по почте недоступно.
+              После регистрации отправим письмо для подтверждения почты.
             </p>
           )}
           <button

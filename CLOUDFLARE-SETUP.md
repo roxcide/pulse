@@ -1,64 +1,52 @@
-# PULSE — регистрация без Email Sending
+# PULSE — Brevo, Google и гостевой вход
 
-## 1. Обновить приложение
+Загрузи содержимое release/pulse-brevo.zip в корень GitHub-репозитория. Deploy command: **pnpm run deploy**. Сборка и миграции выполняются автоматически. Существующую D1 pulse-db не удаляй.
 
-Загрузи содержимое release/pulse-themes-guest.zip в корень GitHub-репозитория (не сам ZIP). Deploy command в Cloudflare: **pnpm run deploy**. Сборка и миграции выполняются автоматически. Базу pulse-db не удаляй.
+## Runtime variables and secrets
 
-Этот вариант убирает Email Sending, подтверждение email и восстановление через письмо. Регистрация сразу создаёт аккаунт и открывает главную страницу с нулевой статистикой. Если предыдущая попытка уже сохранила аккаунт, используй **Войти** с тем же email и первоначальным паролем.
+| Имя                  | Тип        | Значение                        |
+| -------------------- | ---------- | ------------------------------- |
+| APP_ORIGIN           | Variable   | https://pulser.pp.ua            |
+| EMAIL_FROM           | Variable   | noreply@pulser.pp.ua            |
+| BREVO_API_KEY        | Secret     | API-ключ Brevo                  |
+| GOOGLE_CLIENT_ID     | Secret     | Client ID веб-приложения Google |
+| GOOGLE_CLIENT_SECRET | Secret     | Client Secret того же клиента   |
+| DB                   | D1 binding | pulse-db                        |
 
-## 2. Настройки Cloudflare
+Если ключ уже добавлен, повторно вводить его не нужно: имя должно быть BREVO_API_KEY. Настройки нужны именно исполняемому Worker, не только сборке. keep_vars сохраняет переменные Dashboard при деплое. Cloudflare Email Sending и binding EMAIL не нужны.
 
-| Поле                 | Значение                                    |
-| -------------------- | ------------------------------------------- |
-| APP_ORIGIN           | https://pulser.pp.ua (без / в конце)        |
-| GOOGLE_CLIENT_ID     | Secret: Client ID веб-приложения Google     |
-| GOOGLE_CLIENT_SECRET | Secret: Client Secret того же OAuth-клиента |
-| DB                   | D1 binding → pulse-db                       |
+В Brevo должны быть активны домен pulser.pp.ua и отправитель PULSE <noreply@pulser.pp.ua>. Подтверждённый DNS сам по себе не заменяет включённую транзакционную отправку аккаунта Brevo. Логи доставки доступны в Transactional → Logs.
 
-EMAIL_FROM больше не нужен — его можно удалить. Привязка send_email удалена из wrangler.jsonc и не должна присутствовать после публикации. Email Sending подключать или оплачивать для этого варианта не нужно.
+## Проверка после деплоя
 
-**Отдельно про Workers:** хеширование паролей scrypt требует больше CPU, чем лимит Workers Free в 10 мс. Для текущего серверного входа по паролю планируй Workers Paid (от $5/месяц); удаление отправки почты не отменяет вычисления при регистрации и входе. Стоимость: https://developers.cloudflare.com/workers/platform/pricing/ . Лимиты: https://developers.cloudflare.com/workers/platform/limits/ .
+Открой https://pulser.pp.ua/api/auth/config. Ожидаются configured, passwordRegistration и passwordRecovery со значением true; checks.origin, checks.database и checks.email — ready. Это проверка конфигурации; доставку нужно проверить отдельным письмом.
 
-## 3. Google
+1. Создай новый аккаунт. До подтверждения почты сессия не создаётся.
+2. Открой письмо, перейди по ссылке и введи пароль регистрации. Ссылка действует 24 часа.
+3. Войди: все личные показатели нового пользователя — 0.
+4. Нажми «Не помню пароль», укажи свой email. Ссылка для нового пароля действует 30 минут, используется один раз и отзывает прежние сессии.
+5. Если письма нет, проверь спам и Brevo Logs. Повторная отправка доступна раз в минуту, максимум пять раз в час на адрес.
 
-В Google Cloud Console для OAuth-клиента типа Web application:
+Старым пользователям с неподтверждённой почтой при следующем входе будет предложена повторная отправка. Если пароль забыт, используй сброс. Google и гостевой режим не зависят от Brevo. Данные гостя сохраняются только в браузере и не переносятся в аккаунт автоматически.
 
-- Authorized JavaScript origins: https://pulser.pp.ua
-- Authorized redirect URIs: https://pulser.pp.ua/api/auth/callback/google
+## Google
 
-Вход Google не зависит от почтового сервиса. Аккаунты разных способов входа автоматически не объединяются: при занятом адресе используй первоначальный способ. Это предотвращает доступ к чужим тренировкам через совпадение неподтверждённого email.
+Authorized JavaScript origins: https://pulser.pp.ua
 
-## 4. Проверить публикацию
+Authorized redirect URIs: https://pulser.pp.ua/api/auth/callback/google
 
-Открой https://pulser.pp.ua/api/auth/config . Ожидаемый ответ:
+Аккаунты Google и email/пароль автоматически не объединяются. Для Google-аккаунтов восстановление остаётся на стороне Google.
 
-```json
-{
-  "configured": true,
-  "passwordRegistration": true,
-  "providers": { "google": true },
-  "checks": { "origin": "ready", "database": "ready" }
-}
-```
+## Диагностика
 
-Если вместо passwordRegistration виден emailAvailable, опубликована старая версия. Проверь последний успешный deployment и обнови страницу.
+- checks.database: missing_schema — выполни pnpm run db:remote или SQL из migrations/0001_auth.sql в D1 Console. Данные не удаляются.
+- checks.email: not_configured — проверь BREVO_API_KEY и EMAIL_FROM.
+- email_configuration_error — Brevo отклонил настройки; проверь ключ, активность отправителя, доступ к транзакционным письмам и ограничения IP в Brevo.
+- email_unavailable — временный сбой сети, лимит отправки или ошибка сервиса.
+- invalid_token — ссылка истекла, уже использована или отозвана; запроси новую.
+- В остальных случаях смотри error и requestId в ответе API и Worker Logs. Содержимое секретов в логах отсутствует.
 
-1. Зарегистрируй новый аккаунт: главная должна открыться сразу, все личные показатели — 0.
-2. Выйди и войди с тем же паролем.
-3. Проверь Google со своим аккаунтом.
-4. Старые аккаунты, ожидавшие письма, могут входить с первоначальным паролем.
-
-Email в регистрации используется как логин, без проверки владения почтовым ящиком. Сохрани пароль: самостоятельного восстановления по почте больше нет. Для Google восстановление остаётся на стороне Google.
-
-## 5. Если есть ошибка
-
-- database: missing_schema — выполни миграции через pnpm run db:remote или содержимое migrations/0001_auth.sql в D1 → pulse-db → Console. Это не удаляет записи.
-- origin: invalid — проверь APP_ORIGIN.
-- providers.google: false — проверь оба Google Secrets.
-- email_unavailable — запрос дошёл до старого Worker: новая версия не отправляет писем и не возвращает этот код.
-- При другом сбое смотри DevTools → Network → запрос → Response: error и requestId. По идентификатору найди auth_request_failed в Worker Logs. Если вместо JSON пришла HTML-страница, проверь исключения и лимиты CPU Worker.
-
-CSP исправлен в public/_headers: разрешены домены Cloudflare Web Analytics. Ошибка загрузки beacon.min.js не вызывает 503 регистрации. Изменение заголовка применяется после сборки и публикации.
+Сервер использует scrypt для паролей. Сохраняется требование достаточного CPU-бюджета Workers; подключение Brevo не меняет стоимость хеширования. Подробности в DEPLOY.md.
 
 ## Темы и гостевой режим
 

@@ -197,16 +197,16 @@ it("retains changes on failed save and prevents logout until retry succeeds", as
   );
   await screen.findByRole("heading", { name: "С возвращением." });
 });
-it("registers without mail and opens the empty dashboard immediately", async () => {
+it("registers pending and asks the user to verify their mailbox", async () => {
   const original = fetch;
   vi.stubGlobal(
     "fetch",
     vi.fn(async (path, options) => {
       if (path === "/api/auth/register") {
         const data = JSON.parse(options.body);
-        session = { id: "new-user", email: data.email, displayName: data.name };
+
         requests.push({ path, body: data });
-        return Response.json({ user: session }, { status: 201 });
+        return Response.json({ verificationRequired: true }, { status: 201 });
       }
       return original(path, options);
     }),
@@ -236,7 +236,11 @@ it("registers without mail and opens the empty dashboard immediately", async () 
   await userEvent.click(
     screen.getByRole("button", { name: "Создать аккаунт" }),
   );
-  await screen.findByText("Выбери недельную цель");
+  await screen.findByRole("heading", { name: "Проверь почту." });
+  expect(session).toBeNull();
+  expect(
+    screen.getByRole("button", { name: /Отправить письмо ещё раз/ }).disabled,
+  ).toBe(true);
   expect(requests.filter((r) => r.path === "/api/auth/register")).toHaveLength(
     1,
   );
@@ -362,4 +366,79 @@ it("keeps unsaved guest changes visible when browser storage is full", async () 
     JSON.parse(localStorage.getItem("pulse-guest-data-v1")).profile.name,
   ).toBe("Не потерять");
   expect(fetch).not.toHaveBeenCalled();
+});
+
+it("requests password recovery without asking for the old password", async () => {
+  app();
+  await screen.findByRole("heading", { name: "С возвращением." });
+  await userEvent.click(
+    screen.getByRole("button", { name: "Не помню пароль" }),
+  );
+  expect(screen.queryByLabelText("Пароль", { exact: true })).toBeNull();
+  fireEvent.change(screen.getByLabelText("Email"), {
+    target: { value: "one@example.com" },
+  });
+  await userEvent.click(
+    screen.getByRole("button", { name: "Отправить ссылку" }),
+  );
+  expect((await screen.findByRole("status")).textContent).toContain(
+    "Если для этого email",
+  );
+  expect(requests.find((r) => r.path === "/api/auth/reset").body.email).toBe(
+    "one@example.com",
+  );
+});
+it("opens recovery links over guest mode and preserves local workouts", async () => {
+  localStorage.setItem("pulse-guest-mode-v1", "true");
+  localStorage.setItem("pulse-guest-data-v1", JSON.stringify({ history: [] }));
+  window.history.replaceState({}, "", "/?auth=recovery#token=test-token");
+  app();
+  await screen.findByRole("heading", { name: "Новый пароль." });
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Сохранить пароль" }).disabled,
+    ).toBe(false),
+  );
+  expect(location.hash).toBe("");
+  fireEvent.change(screen.getByLabelText("Пароль", { exact: true }), {
+    target: { value: "new-strong-password" },
+  });
+  fireEvent.change(screen.getByLabelText("Повтори пароль"), {
+    target: { value: "new-strong-password" },
+  });
+  await userEvent.click(
+    screen.getByRole("button", { name: "Сохранить пароль" }),
+  );
+  await screen.findByRole("heading", { name: "Готово." });
+  expect(
+    requests.find((r) => r.path === "/api/auth/update-password").body.token,
+  ).toBe("test-token");
+  await userEvent.click(
+    screen.getByRole("button", { name: "Войти", exact: true }),
+  );
+  await screen.findByRole("heading", { name: "С возвращением." });
+  expect(localStorage.getItem("pulse-guest-data-v1")).toBe(
+    JSON.stringify({ history: [] }),
+  );
+});
+it("waits for explicit confirmation before consuming a verification link", async () => {
+  window.history.replaceState({}, "", "/?auth=verify#token=verify-token");
+  app();
+  await screen.findByRole("heading", { name: "Подтверди почту." });
+  await waitFor(() =>
+    expect(
+      screen.getByRole("button", { name: "Подтвердить почту" }).disabled,
+    ).toBe(false),
+  );
+  expect(requests.some((r) => r.path === "/api/auth/verify")).toBe(false);
+  fireEvent.change(screen.getByLabelText("Пароль", { exact: true }), {
+    target: { value: "the-original-password" },
+  });
+  await userEvent.click(
+    screen.getByRole("button", { name: "Подтвердить почту" }),
+  );
+  await screen.findByRole("heading", { name: "Готово." });
+  expect(
+    requests.find((r) => r.path === "/api/auth/verify").body,
+  ).toMatchObject({ token: "verify-token", password: "the-original-password" });
 });
