@@ -84,6 +84,20 @@ export function AuthProvider({ children }) {
     setUser(null);
     window.history.replaceState({}, "", location.pathname);
   }
+  async function deleteAccount(email) {
+    if (isGuest || !user) throw new Error("unauthorized");
+    await api(
+      "/api/auth/account",
+      { email, confirmation: "DELETE" },
+      "DELETE",
+      user.id,
+    );
+    setPendingVerification(null);
+    setEmailAction(null);
+    setError("");
+    setUser(null);
+    window.history.replaceState({}, "", location.pathname);
+  }
   useEffect(() => {
     if (isGuest && !emailAction) {
       setLoading(false);
@@ -126,6 +140,7 @@ export function AuthProvider({ children }) {
         reloadSession,
         completeSignIn,
         logout,
+        deleteAccount,
       }}
     >
       {children}

@@ -90,7 +90,8 @@ export function GuestDataProvider({ user, children }) {
 }
 
 export function UserDataProvider({ user, children }) {
-  const { logout } = useAuth();
+  const { logout, deleteAccount } = useAuth();
+  const deleting = useRef(false);
   const [data, setData] = useState(null),
     [loadError, setLoadError] = useState(""),
     [status, setStatus] = useState("saved"),
@@ -131,6 +132,7 @@ export function UserDataProvider({ user, children }) {
     return () => window.removeEventListener("beforeunload", warn);
   }, []);
   async function flush() {
+    if (deleting.current) return;
     clearTimeout(timer.current);
     if (running.current) {
       await running.current;
@@ -160,6 +162,7 @@ export function UserDataProvider({ user, children }) {
     if (Object.keys(dirty.current).length && alive.current) return flush();
   }
   function update(key, value) {
+    if (deleting.current) return;
     const next =
       typeof value === "function" ? value(current.current[key]) : value;
     current.current = { ...current.current, [key]: next };
@@ -178,6 +181,22 @@ export function UserDataProvider({ user, children }) {
     } catch (err) {
       setStatus("error");
       setError(authError(err));
+    }
+  }
+  async function removeAccount(email) {
+    if (deleting.current) return;
+    deleting.current = true;
+    clearTimeout(timer.current);
+    try {
+      // Let an existing save finish before deleting; unsaved changes need not block deletion.
+      if (running.current) await running.current.catch(() => {});
+      await deleteAccount(email);
+      dirty.current = {};
+    } catch (err) {
+      deleting.current = false;
+      if (Object.keys(dirty.current).length)
+        timer.current = setTimeout(() => flush().catch(() => {}), 400);
+      throw err;
     }
   }
   if (loadError)
@@ -207,7 +226,9 @@ export function UserDataProvider({ user, children }) {
       </div>
     );
   return (
-    <DataContext.Provider value={{ data, update, status, signOut }}>
+    <DataContext.Provider
+      value={{ data, update, status, signOut, removeAccount }}
+    >
       {status === "error" && (
         <div className="sync-error" role="alert">
           <span>

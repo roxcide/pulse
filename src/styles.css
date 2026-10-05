@@ -4007,3 +4007,33 @@ h1 {
   letter-spacing: 0.35em;
   padding-left: calc(16px + 0.35em);
 }
+
+.account-panel {
+  display: grid;
+  gap: 16px;
+}
+.account-panel .form-field {
+  margin-bottom: 0;
+}
+.account-panel .form-hint {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.account-panel h3 {
+  font-size: 16px;
+  line-height: 1.5;
+}
+.account-warning {
+  line-height: 1.7;
+  font-size: 14px;
+}
+.account-danger-zone {
+  display: grid;
+  gap: 14px;
+  padding-top: 20px;
+  margin-top: 8px;
+  border-top: 1px solid var(--theme-border, #3b4233);
+}
+.account-panel .danger-button {
+  color: #fff1ed;
+}

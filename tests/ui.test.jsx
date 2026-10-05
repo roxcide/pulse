@@ -174,7 +174,9 @@ it("retains changes on failed save and prevents logout until retry succeeds", as
   failSave = true;
   app();
   await screen.findByText("Выбери недельную цель");
-  await userEvent.click(screen.getByRole("button", { name: "Изменить цель" }));
+  await userEvent.click(
+    screen.getByRole("button", { name: "Настройки", exact: true }),
+  );
   fireEvent.change(screen.getByLabelText("Как тебя зовут"), {
     target: { value: "Новое имя" },
   });
@@ -182,7 +184,17 @@ it("retains changes on failed save and prevents logout until retry succeeds", as
     screen.getByRole("button", { name: /Сохранить настройки/ }),
   );
   await screen.findByRole("alert");
-  await userEvent.click(screen.getByRole("button", { name: "Изменить цель" }));
+  await userEvent.click(
+    screen.getByRole("button", { name: "Настройки", exact: true }),
+  );
+  if (!screen.queryByRole("dialog", { name: "Твой аккаунт" })) {
+    await userEvent.click(
+      screen.getByRole("button", { name: "Закрыть", exact: true }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Аккаунт", exact: true }),
+    );
+  }
   await userEvent.click(
     screen.getByRole("button", { name: "Выйти из аккаунта" }),
   );
@@ -192,6 +204,14 @@ it("retains changes on failed save and prevents logout until retry succeeds", as
     screen.getByRole("button", { name: "Повторить", exact: true }),
   );
   await waitFor(() => expect(saved.profile.name).toBe("Новое имя"));
+  if (!screen.queryByRole("dialog", { name: "Твой аккаунт" })) {
+    await userEvent.click(
+      screen.getByRole("button", { name: "Закрыть", exact: true }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Аккаунт", exact: true }),
+    );
+  }
   await userEvent.click(
     screen.getByRole("button", { name: "Выйти из аккаунта" }),
   );
@@ -301,6 +321,14 @@ it("persists guest settings across reloads without calling the account API", asy
   await userEvent.click(
     screen.getByRole("button", { name: "Настройки", exact: true }),
   );
+  if (!screen.queryByRole("dialog", { name: "Твой аккаунт" })) {
+    await userEvent.click(
+      screen.getByRole("button", { name: "Закрыть", exact: true }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Аккаунт", exact: true }),
+    );
+  }
   await userEvent.click(
     screen.getByRole("button", { name: "Войти или зарегистрироваться" }),
   );
@@ -357,10 +385,18 @@ it("keeps unsaved guest changes visible when browser storage is full", async () 
   await userEvent.click(
     screen.getByRole("button", { name: "Настройки", exact: true }),
   );
+  if (!screen.queryByRole("dialog", { name: "Твой аккаунт" })) {
+    await userEvent.click(
+      screen.getByRole("button", { name: "Закрыть", exact: true }),
+    );
+    await userEvent.click(
+      screen.getByRole("button", { name: "Аккаунт", exact: true }),
+    );
+  }
   await userEvent.click(
     screen.getByRole("button", { name: "Войти или зарегистрироваться" }),
   );
-  expect(screen.getByRole("heading", { name: "Твои настройки" })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Твой аккаунт" })).toBeTruthy();
   blocked.mockRestore();
   await userEvent.click(
     screen.getByRole("button", { name: "Повторить", exact: true }),
@@ -458,4 +494,169 @@ it("restores the code form and enters the account without another password", asy
     "001234",
   );
   expect(requests.some((r) => r.path === "/api/auth/login")).toBe(false);
+});
+
+it("edits goals separately from settings and preserves unrelated fields", async () => {
+  localStorage.setItem("pulse-guest-mode-v1", "true");
+  app();
+  await screen.findByText("Выбери недельную цель");
+  await userEvent.click(screen.getByRole("button", { name: "Изменить цель" }));
+  expect(screen.queryByLabelText("Как тебя зовут")).toBeNull();
+  expect(screen.queryByLabelText("Отдых между подходами")).toBeNull();
+  fireEvent.change(screen.getByLabelText("Цель: тренировочных дней в неделю"), {
+    target: { value: "4" },
+  });
+  await userEvent.click(screen.getByRole("button", { name: "Сохранить цель" }));
+  await userEvent.click(
+    screen.getByRole("button", { name: "Настройки", exact: true }),
+  );
+  expect(
+    screen.queryByLabelText("Цель: тренировочных дней в неделю"),
+  ).toBeNull();
+  fireEvent.change(screen.getByLabelText("Как тебя зовут"), {
+    target: { value: "Атлет" },
+  });
+  fireEvent.change(screen.getByLabelText("Отдых между подходами"), {
+    target: { value: "120" },
+  });
+  await userEvent.click(
+    screen.getByRole("button", { name: "Сохранить настройки" }),
+  );
+  expect(
+    JSON.parse(localStorage.getItem("pulse-guest-data-v1")).profile,
+  ).toEqual({ name: "Атлет", rest: 120, goal: 4 });
+  await userEvent.click(screen.getByRole("button", { name: "Изменить цель" }));
+  fireEvent.change(screen.getByLabelText("Цель: тренировочных дней в неделю"), {
+    target: { value: "2" },
+  });
+  await userEvent.click(screen.getByRole("button", { name: "Сохранить цель" }));
+  expect(
+    JSON.parse(localStorage.getItem("pulse-guest-data-v1")).profile,
+  ).toEqual({ name: "Атлет", rest: 120, goal: 2 });
+});
+it("requires deletion confirmation and retains the account after failure", async () => {
+  session = { id: "one", email: "one@example.com", displayName: "Анна" };
+  let failDelete = true;
+  const original = fetch;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (path, options) => {
+      if (path === "/api/auth/account") {
+        requests.push({
+          path,
+          body: JSON.parse(options.body),
+          method: options.method,
+        });
+        expect(options.headers["X-Pulse-Account"]).toBe("one");
+        if (failDelete)
+          return Response.json({ error: "server_error" }, { status: 503 });
+        session = null;
+        return Response.json({ ok: true });
+      }
+      return original(path, options);
+    }),
+  );
+  app();
+  await screen.findByText("Выбери недельную цель");
+  await userEvent.click(
+    screen.getByRole("button", { name: "Аккаунт", exact: true }),
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "Удалить аккаунт", exact: true }),
+  );
+  expect(
+    screen.getByText(/Восстановить аккаунт и прогресс будет невозможно/),
+  ).toBeTruthy();
+  expect(
+    screen.getByRole("button", { name: "Удалить навсегда" }).disabled,
+  ).toBe(true);
+  await userEvent.click(screen.getByRole("button", { name: "Отмена" }));
+  expect(requests.some((r) => r.method === "DELETE")).toBe(false);
+  await userEvent.click(
+    screen.getByRole("button", { name: "Удалить аккаунт", exact: true }),
+  );
+  fireEvent.change(screen.getByLabelText("Введи email для подтверждения"), {
+    target: { value: "one@example.com" },
+  });
+  await userEvent.click(
+    screen.getByRole("button", { name: "Удалить навсегда" }),
+  );
+  expect((await screen.findByRole("alert")).textContent).toContain("сервере");
+  expect(session).not.toBeNull();
+  failDelete = false;
+  await userEvent.click(
+    screen.getByRole("button", { name: "Удалить навсегда" }),
+  );
+  await screen.findByRole("heading", { name: "С возвращением." });
+  expect(requests.filter((r) => r.method === "DELETE")).toHaveLength(2);
+});
+it("does not offer account deletion to guests", async () => {
+  localStorage.setItem("pulse-guest-mode-v1", "true");
+  app();
+  await screen.findByText("Выбери недельную цель");
+  await userEvent.click(
+    screen.getByRole("button", { name: "Аккаунт", exact: true }),
+  );
+  expect(
+    screen.queryByRole("button", { name: "Удалить аккаунт", exact: true }),
+  ).toBeNull();
+  expect(
+    screen.getByRole("button", { name: "Войти или зарегистрироваться" }),
+  ).toBeTruthy();
+});
+
+it("waits for an in-flight save before deletion even when that save fails", async () => {
+  session = { id: "one", email: "one@example.com", displayName: "Анна" };
+  let finishSave;
+  const original = fetch;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (path, options) => {
+      if (path === "/api/state" && options.method === "PUT") {
+        requests.push({ path, method: "PUT" });
+        return new Promise((resolve) => {
+          finishSave = () =>
+            resolve(Response.json({ error: "server_error" }, { status: 503 }));
+        });
+      }
+      if (path === "/api/auth/account") {
+        requests.push({ path, method: "DELETE" });
+        session = null;
+        return Response.json({ ok: true });
+      }
+      return original(path, options);
+    }),
+  );
+  app();
+  await screen.findByText("Выбери недельную цель");
+  await userEvent.click(
+    screen.getByRole("button", { name: "Настройки", exact: true }),
+  );
+  fireEvent.change(screen.getByLabelText("Как тебя зовут"), {
+    target: { value: "Новое имя" },
+  });
+  await userEvent.click(
+    screen.getByRole("button", { name: "Сохранить настройки" }),
+  );
+  await waitFor(() => expect(finishSave).toBeTypeOf("function"));
+  await userEvent.click(
+    screen.getByRole("button", { name: "Аккаунт", exact: true }),
+  );
+  await userEvent.click(
+    screen.getByRole("button", { name: "Удалить аккаунт", exact: true }),
+  );
+  fireEvent.change(screen.getByLabelText("Введи email для подтверждения"), {
+    target: { value: "one@example.com" },
+  });
+  await userEvent.click(
+    screen.getByRole("button", { name: "Удалить навсегда" }),
+  );
+  expect(requests.some((r) => r.method === "DELETE")).toBe(false);
+  expect(
+    screen.getByRole("button", { name: "Закрыть", exact: true }).disabled,
+  ).toBe(true);
+  finishSave();
+  await screen.findByRole("heading", { name: "С возвращением." });
+  expect(requests.filter((r) => r.method === "PUT")).toHaveLength(1);
+  expect(requests.filter((r) => r.method === "DELETE")).toHaveLength(1);
 });

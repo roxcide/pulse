@@ -45,6 +45,8 @@ export function authError(error) {
       invalid_token:
         "Ссылка недействительна или устарела. Запроси новое письмо.",
       invalid_credentials: "Неверный email или пароль.",
+      deletion_not_confirmed:
+        "Для подтверждения удаления введи email своего аккаунта.",
       invalid_code:
         "Код неверный или срок его действия истёк. Проверь 6 цифр или запроси новый код.",
       verification_expired:

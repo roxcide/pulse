@@ -31,6 +31,7 @@ import {
   CheckCheck,
 } from "lucide-react";
 import { useAuth } from "./auth/AuthProvider";
+import AccountPanel from "./account/AccountPanel";
 import { ThemePicker } from "./theme";
 import { useUserData } from "./state/UserDataProvider";
 import { useStoredState } from "./hooks";
@@ -73,7 +74,7 @@ const formatTime = (seconds) =>
 
 export default function App() {
   const { user, isGuest } = useAuth();
-  const { status, signOut } = useUserData();
+  const { status } = useUserData();
   const [page, setPage] = useState(() => {
     const hash = location.hash.slice(1);
     return titles[hash] ? hash : "dashboard";
@@ -86,7 +87,10 @@ export default function App() {
   const [profile, setProfile] = useStoredState("profile");
   const [modal, setModal] = useState(null),
     [toast, setToast] = useState("");
-  const closeModal = useCallback(() => setModal(null), []);
+  const [accountBusy, setAccountBusy] = useState(false);
+  const closeModal = useCallback(() => {
+    if (!accountBusy) setModal(null);
+  }, [accountBusy]);
   const [month, setMonth] = useState(new Date()),
     [selected, setSelected] = useState(dateKey(new Date()));
   const [weekView, setWeekView] = useState(false),
@@ -442,7 +446,8 @@ export default function App() {
           </button>
           <button
             className="profile"
-            onClick={() => setModal({ type: "settings" })}
+            aria-label="Открыть аккаунт"
+            onClick={() => setModal({ type: "account" })}
           >
             <div className="avatar">
               {profile.name.slice(0, 1).toUpperCase()}
@@ -481,9 +486,16 @@ export default function App() {
               <CircleHelp size={19} />
             </button>
             <button
-              className="avatar small"
+              className="icon-button"
               aria-label="Настройки профиля"
               onClick={() => setModal({ type: "settings" })}
+            >
+              <Settings size={19} />
+            </button>
+            <button
+              className="avatar small"
+              aria-label="Аккаунт"
+              onClick={() => setModal({ type: "account" })}
             >
               {profile.name.slice(0, 1).toUpperCase()}
             </button>
@@ -588,7 +600,7 @@ export default function App() {
                   <p>Стабильность важнее совершенства.</p>
                   <button
                     className="text-button"
-                    onClick={() => setModal({ type: "settings" })}
+                    onClick={() => setModal({ type: "goal" })}
                   >
                     Изменить цель
                     <ArrowUpRight size={14} />
@@ -1431,6 +1443,8 @@ export default function App() {
           title={
             {
               settings: "Твои настройки",
+              goal: "Твоя недельная цель",
+              account: "Твой аккаунт",
               exercise: "Новое упражнение",
               split: fullDayNames[modal.day],
               plan: "План на тренировку",
@@ -1444,7 +1458,11 @@ export default function App() {
             }[modal.type]
           }
           onClose={closeModal}
+          busy={accountBusy}
         >
+          {modal.type === "account" && (
+            <AccountPanel onBusyChange={setAccountBusy} />
+          )}
           {modal.type === "settings" && (
             <>
               <ThemePicker />
@@ -1452,11 +1470,11 @@ export default function App() {
                 onSubmit={(e) => {
                   e.preventDefault();
                   const data = new FormData(e.currentTarget);
-                  setProfile({
+                  setProfile((previous) => ({
+                    ...previous,
                     name: data.get("name").trim() || "Атлет",
-                    goal: Number(data.get("goal")),
                     rest: Number(data.get("rest")),
-                  });
+                  }));
                   setModal(null);
                   notify("Настройки сохранены");
                 }}
@@ -1471,17 +1489,6 @@ export default function App() {
                   />
                 </label>
                 <label className="form-field">
-                  Цель: тренировочных дней в неделю
-                  <select name="goal" defaultValue={profile.goal}>
-                    <option value={0}>Не задана</option>
-                    {[1, 2, 3, 4, 5, 6, 7].map((n) => (
-                      <option key={n} value={n}>
-                        {n}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label className="form-field">
                   Отдых между подходами
                   <select name="rest" defaultValue={profile.rest}>
                     {[30, 60, 90, 120, 180].map((n) => (
@@ -1491,26 +1498,42 @@ export default function App() {
                     ))}
                   </select>
                 </label>
-                <p className="form-hint">
-                  {isGuest
-                    ? "Гостевой режим. Прогресс хранится только в этом браузере и не переносится в аккаунт автоматически."
-                    : `Аккаунт: ${user.email}. Тренировки сохраняются в твоём профиле.`}
-                </p>
                 <button className="primary-button full-width" type="submit">
                   Сохранить настройки
                   <Check size={17} />
                 </button>
-                <button
-                  type="button"
-                  className="text-button settings-clean"
-                  onClick={signOut}
-                >
-                  {isGuest
-                    ? "Войти или зарегистрироваться"
-                    : "Выйти из аккаунта"}
-                </button>
               </form>
             </>
+          )}
+          {modal.type === "goal" && (
+            <form
+              onSubmit={(event) => {
+                event.preventDefault();
+                const goal = Number(
+                  new FormData(event.currentTarget).get("goal"),
+                );
+                setProfile((previous) => ({ ...previous, goal }));
+                setModal(null);
+                notify("Недельная цель сохранена");
+              }}
+            >
+              <label className="form-field">
+                Цель: тренировочных дней в неделю
+                <select name="goal" defaultValue={profile.goal}>
+                  <option value={0}>Не задана</option>
+                  {[1, 2, 3, 4, 5, 6, 7].map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <button className="primary-button full-width" type="submit">
+                Сохранить цель
+                <Check size={17} />
+              </button>
+            </form>
           )}
           {modal.type === "exercise" && (
             <form

@@ -69,6 +69,22 @@ async function route(request, env) {
       "Set-Cookie": cookie(env, "session", "", 0),
     });
   }
+  if (path === "/api/auth/account" && method === "DELETE") {
+    const user = await currentUser(request, env);
+    if (!user) fail(401, "unauthorized");
+    if (request.headers.get("X-Pulse-Account") !== user.id)
+      fail(409, "account_changed");
+    const data = await body(request);
+    if (data.confirmation !== "DELETE" || emailValue(data.email) !== user.email)
+      fail(400, "deletion_not_confirmed");
+    await limit(env, `delete-account:${user.id}`, 5, 3600);
+    // Foreign keys cascade atomically to workouts, identities, sessions and email tokens.
+    await env.DB.prepare("DELETE FROM users WHERE id = ?").bind(user.id).run();
+    const response = json({ ok: true });
+    for (const type of ["session", "verification", "oauth"])
+      response.headers.append("Set-Cookie", cookie(env, type, "", 0));
+    return response;
+  }
   if (path === "/api/state") {
     const user = await currentUser(request, env);
     if (!user) fail(401, "unauthorized");

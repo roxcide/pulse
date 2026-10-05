@@ -739,3 +739,133 @@ it("reuses a Google account on subsequent logins without email sending", async (
   expect(env.DB.raw.prepare("SELECT count(*) AS n FROM users").get().n).toBe(1);
   expect(env.DB.raw.prepare("SELECT id FROM users").get().id).toBe(id);
 });
+
+it("deletes only the authenticated account and all its related data", async () => {
+  const cookie = await account(),
+    other = await account("other@example.com");
+  const id = env.DB.raw
+    .prepare("SELECT id FROM users WHERE email=?")
+    .get("one@example.com").id;
+  await call(
+    "/api/state",
+    { history: [], profile: { name: "Анна", goal: 4, rest: 90 } },
+    { cookie, method: "PUT" },
+  );
+  env.DB.raw
+    .prepare("INSERT INTO identities VALUES('google','linked-test',?)")
+    .run(id);
+  await call("/api/auth/reset", { email: "one@example.com" });
+  const oldToken = mailToken();
+  const anotherSession = await call("/api/auth/login", {
+    email: "one@example.com",
+    password,
+  });
+  const confirmation = { confirmation: "DELETE", email: "one@example.com" };
+  expect(
+    (
+      await call("/api/auth/account", confirmation, {
+        cookie,
+        method: "DELETE",
+        origin: "https://evil.example",
+      })
+    ).status,
+  ).toBe(403);
+  expect(
+    (
+      await call("/api/auth/account", confirmation, {
+        cookie,
+        method: "DELETE",
+        accountId: "stale-user",
+      })
+    ).status,
+  ).toBe(409);
+  expect(
+    (
+      await call(
+        "/api/auth/account",
+        { confirmation: "DELETE", email: "other@example.com" },
+        { cookie, method: "DELETE" },
+      )
+    ).status,
+  ).toBe(400);
+  expect(
+    (
+      await call(
+        "/api/auth/account",
+        { email: "one@example.com" },
+        { cookie, method: "DELETE" },
+      )
+    ).status,
+  ).toBe(400);
+  expect(
+    (await call("/api/auth/account", confirmation, { method: "DELETE" }))
+      .status,
+  ).toBe(401);
+  const result = await call("/api/auth/account", confirmation, {
+    cookie,
+    method: "DELETE",
+  });
+  expect(result.status).toBe(200);
+  expect(result.headers.getSetCookie()).toHaveLength(3);
+  for (const table of [
+    "identities",
+    "sessions",
+    "email_tokens",
+    "fitness_state",
+  ])
+    expect(
+      env.DB.raw
+        .prepare("SELECT count(*) AS n FROM " + table + " WHERE user_id=?")
+        .get(id).n,
+    ).toBe(0);
+  expect(
+    env.DB.raw.prepare("SELECT id FROM users WHERE id=?").get(id),
+  ).toBeUndefined();
+  expect((await call("/api/state", undefined, { cookie })).status).toBe(401);
+  expect(
+    (
+      await call("/api/state", undefined, {
+        cookie: anotherSession.headers.get("set-cookie"),
+      })
+    ).status,
+  ).toBe(401);
+  expect(
+    (
+      await call("/api/auth/update-password", {
+        token: oldToken,
+        password: "new-password",
+      })
+    ).status,
+  ).toBe(400);
+  expect((await call("/api/state", undefined, { cookie: other })).status).toBe(
+    200,
+  );
+  expect(
+    (await call("/api/auth/login", { email: "one@example.com", password }))
+      .status,
+  ).toBe(401);
+  expect((await register()).status).toBe(201);
+  expect(
+    env.DB.raw
+      .prepare("SELECT id FROM users WHERE email=?")
+      .get("one@example.com").id,
+  ).not.toBe(id);
+});
+it("deletes Google accounts without requiring a password", async () => {
+  const login = await googleCallback();
+  const cookie = login.headers.get("set-cookie").split(";")[0];
+  const user = env.DB.raw.prepare("SELECT * FROM users").get();
+  expect(user.password_hash).toBeNull();
+  expect(
+    (
+      await call(
+        "/api/auth/account",
+        { confirmation: "DELETE", email: user.email },
+        { cookie, method: "DELETE" },
+      )
+    ).status,
+  ).toBe(200);
+  expect(
+    env.DB.raw.prepare("SELECT count(*) AS n FROM identities").get().n,
+  ).toBe(0);
+});

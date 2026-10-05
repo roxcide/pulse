@@ -45,7 +45,7 @@ export function SectionHeading({ eyebrow, title, action, onAction }) {
     </div>
   );
 }
-export function Modal({ title, children, onClose }) {
+export function Modal({ title, children, onClose, busy = false }) {
   const ref = useRef(null);
   useEffect(() => {
     const before = document.activeElement;
@@ -97,6 +97,7 @@ export function Modal({ title, children, onClose }) {
             className="icon-button"
             onClick={onClose}
             aria-label="Закрыть"
+            disabled={busy}
           >
             <X size={20} />
           </button>
