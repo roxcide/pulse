@@ -31,7 +31,7 @@ export async function authConfig(env) {
     try {
       // LIMIT 0 checks the deployed schema without reading personal data.
       await env.DB.prepare(
-        `SELECT users.id, users.email, users.display_name, users.password_hash, users.email_verified, users.created_at,
+        `SELECT users.id, users.email, users.display_name, users.password_hash, users.email_verified, users.created_at, users.blocked, users.revision,
         identities.provider, identities.subject, identities.user_id, sessions.token_hash, sessions.user_id, sessions.expires_at,
         email_tokens.token_hash, email_tokens.user_id, email_tokens.kind, email_tokens.expires_at,
         oauth_states.state_hash, oauth_states.provider, oauth_states.nonce, oauth_states.verifier, oauth_states.browser_hash, oauth_states.expires_at,

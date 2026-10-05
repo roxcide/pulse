@@ -27,6 +27,15 @@ export async function api(path, data, method = "POST", accountId) {
 export function authError(error) {
   const message =
     {
+      admin_required: "Этот раздел доступен только администратору.",
+      admin_protected:
+        "Аккаунт владельца защищён от изменения и удаления в админ-панели.",
+      admin_conflict:
+        "Данные изменились после открытия карточки. Загрузи свежую версию перед сохранением.",
+      user_not_found: "Пользователь уже удалён или не найден.",
+      account_blocked: "Вход в этот аккаунт заблокирован администратором.",
+      password_required_for_email_change:
+        "Для смены email у аккаунта Google сначала задай новый пароль.",
       database_not_initialized:
         "Сервис входа ещё не подготовлен. Владелец сайта должен применить миграции базы данных.",
       database_unavailable:

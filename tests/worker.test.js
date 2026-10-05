@@ -22,6 +22,12 @@ function database() {
       "utf8",
     ),
   );
+  db.exec(
+    readFileSync(
+      new URL("../migrations/0002_admin.sql", import.meta.url),
+      "utf8",
+    ),
+  );
   return {
     raw: db,
     prepare(sql) {
@@ -868,4 +874,474 @@ it("deletes Google accounts without requiring a password", async () => {
   expect(
     env.DB.raw.prepare("SELECT count(*) AS n FROM identities").get().n,
   ).toBe(0);
+});
+
+function seedAdminUser(id, email, verified = 1) {
+  env.DB.raw
+    .prepare(
+      "INSERT INTO users(id,email,display_name,email_verified,created_at) VALUES(?,?,?,?,?)",
+    )
+    .run(id, email, id, verified, Date.now());
+  const token = `test-session-${id}`;
+  env.DB.raw
+    .prepare("INSERT INTO sessions VALUES(?,?,?)")
+    .run(
+      createHash("sha256").update(token).digest("hex"),
+      id,
+      Date.now() + 3600000,
+    );
+  return `__Host-pulse_session=${token}`;
+}
+function adminUpdate(snapshot, account = {}, state = {}) {
+  return {
+    revision: snapshot.user.revision,
+    account: {
+      displayName: snapshot.user.displayName,
+      email: snapshot.user.email,
+      emailVerified: snapshot.user.emailVerified,
+      blocked: snapshot.user.blocked,
+      ...account,
+    },
+    state: {
+      profile: {
+        name: account.displayName || snapshot.user.displayName,
+        goal: 3,
+        rest: 90,
+      },
+      history: [],
+      plans: [],
+      active: null,
+      split: Array(7).fill("Не запланировано"),
+      exercises: [],
+      ...state,
+    },
+  };
+}
+
+describe("admin access and account management", () => {
+  it("requires the verified owner and a matching session account on every endpoint", async () => {
+    const normal = seedAdminUser("normal", "normal@example.com");
+    const unverifiedOwner = seedAdminUser("owner", "uvukostya@gmail.com", 0);
+    for (const [path, method, data] of [
+      ["/api/admin/users", "GET", undefined],
+      ["/api/admin/users/normal", "GET", undefined],
+      ["/api/admin/audit", "GET", undefined],
+      ["/api/admin/users/normal", "PUT", {}],
+      ["/api/admin/users/normal", "DELETE", {}],
+    ]) {
+      expect((await call(path, data, { method })).status).toBe(401);
+      expect((await call(path, data, { method, cookie: normal })).status).toBe(
+        403,
+      );
+      expect(
+        (await call(path, data, { method, cookie: unverifiedOwner })).status,
+      ).toBe(401);
+    }
+    await call(
+      "/api/state",
+      {
+        profile: {
+          name: "uvukostya@gmail.com",
+          goal: 0,
+          rest: 90,
+          isAdmin: true,
+        },
+      },
+      { method: "PUT", cookie: normal },
+    );
+    expect(
+      (await call("/api/admin/users", undefined, { cookie: normal })).status,
+    ).toBe(403);
+    env.DB.raw.exec("UPDATE users SET email_verified=1 WHERE id='owner'");
+    expect(
+      (
+        await (
+          await call("/api/auth/session", undefined, {
+            cookie: unverifiedOwner,
+          })
+        ).json()
+      ).user.isAdmin,
+    ).toBe(true);
+    expect(
+      (
+        await call("/api/admin/users", undefined, {
+          cookie: unverifiedOwner,
+          accountId: "normal",
+        })
+      ).status,
+    ).toBe(409);
+    expect(
+      (
+        await call(
+          "/api/admin/users/normal",
+          { revision: 0 },
+          {
+            cookie: unverifiedOwner,
+            method: "DELETE",
+            origin: "https://evil.example",
+          },
+        )
+      ).status,
+    ).toBe(403);
+  });
+  it("paginates and searches without exposing credential hashes or session tokens", async () => {
+    const owner = seedAdminUser("owner", "uvukostya@gmail.com");
+    for (let i = 0; i < 27; i++)
+      seedAdminUser(`person-${i}`, `person-${i}@example.com`);
+    const first = await (
+      await call("/api/admin/users", undefined, { cookie: owner })
+    ).json();
+    const second = await (
+      await call("/api/admin/users?page=1", undefined, { cookie: owner })
+    ).json();
+    expect(first.total).toBe(28);
+    expect(first.users).toHaveLength(25);
+    expect(second.users).toHaveLength(3);
+    const search = await (
+      await call("/api/admin/users?q=person-26%40example.com", undefined, {
+        cookie: owner,
+      })
+    ).json();
+    expect(search.users.map((u) => u.id)).toEqual(["person-26"]);
+    const detail = await (
+      await call("/api/admin/users/person-26", undefined, { cookie: owner })
+    ).json();
+    expect(detail.user).not.toHaveProperty("password_hash");
+    expect(JSON.stringify(first)).not.toContain("token_hash");
+    expect(
+      (await call("/api/admin/users?page=-1", undefined, { cookie: owner }))
+        .status,
+    ).toBe(400);
+  });
+  it("edits account and fitness data atomically, revokes sessions and records an audit entry", async () => {
+    const owner = seedAdminUser("owner", "uvukostya@gmail.com");
+    const target = seedAdminUser("person", "person@example.com");
+    const snapshot = await (
+      await call("/api/admin/users/person", undefined, { cookie: owner })
+    ).json();
+    const data = adminUpdate(snapshot, {
+      displayName: "Новое имя",
+      password: "new pass 123",
+    });
+    const response = await call("/api/admin/users/person", data, {
+      method: "PUT",
+      cookie: owner,
+    });
+    expect(response.status).toBe(200);
+    const result = await response.json();
+    expect(result.user.displayName).toBe("Новое имя");
+    expect(result.state.profile.name).toBe("Новое имя");
+    expect(result.user.revision).toBeGreaterThan(snapshot.user.revision);
+    expect(JSON.stringify(result)).not.toContain("new pass 123");
+    expect(result.user.hasPassword).toBe(true);
+    expect(
+      (await call("/api/state", undefined, { cookie: target })).status,
+    ).toBe(401);
+    const login = await call("/api/auth/login", {
+      email: "person@example.com",
+      password: "new pass 123",
+    });
+    expect(login.status).toBe(200);
+    expect(
+      (
+        await (
+          await call("/api/admin/audit", undefined, { cookie: owner })
+        ).json()
+      ).entries[0].action,
+    ).toBe("update_account");
+  });
+  it("rolls back conflicting snapshots including changes racing the transaction", async () => {
+    const owner = seedAdminUser("owner", "uvukostya@gmail.com");
+    const target = seedAdminUser("person", "person@example.com");
+    const snapshot = await (
+      await call("/api/admin/users/person", undefined, { cookie: owner })
+    ).json();
+    const batch = env.DB.batch.bind(env.DB);
+    let race = true;
+    env.DB.batch = async (statements) => {
+      if (race) {
+        race = false;
+        env.DB.raw
+          .prepare("INSERT INTO fitness_state VALUES(?,?,?)")
+          .run(
+            "person",
+            "profile",
+            JSON.stringify({ name: "Сам пользователь", goal: 5, rest: 120 }),
+          );
+      }
+      return batch(statements);
+    };
+    const response = await call(
+      "/api/admin/users/person",
+      adminUpdate(snapshot),
+      { method: "PUT", cookie: owner },
+    );
+    expect(response.status).toBe(409);
+    expect((await response.json()).error).toBe("admin_conflict");
+    expect(
+      (await (await call("/api/state", undefined, { cookie: target })).json())
+        .state.profile.name,
+    ).toBe("Сам пользователь");
+    expect(
+      env.DB.raw.prepare("SELECT COUNT(*) AS n FROM admin_audit").get().n,
+    ).toBe(0);
+    expect(
+      (
+        await call("/api/admin/users/person", adminUpdate(snapshot), {
+          method: "PUT",
+          cookie: owner,
+        })
+      ).status,
+    ).toBe(409);
+  });
+  it("blocks password and Google session creation and prevents writes from revoked sessions", async () => {
+    const owner = seedAdminUser("owner", "uvukostya@gmail.com");
+    const target = seedAdminUser("person", "person@example.com");
+    let snapshot = await (
+      await call("/api/admin/users/person", undefined, { cookie: owner })
+    ).json();
+    expect(
+      (
+        await call(
+          "/api/admin/users/person",
+          adminUpdate(snapshot, { blocked: true, password: "new pass 123" }),
+          { method: "PUT", cookie: owner },
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await call("/api/auth/login", {
+          email: "person@example.com",
+          password: "new pass 123",
+        })
+      ).status,
+    ).toBe(403);
+    const { newSession } = await import("../server/security.js");
+    await expect(newSession(env, { id: "person" })).rejects.toThrow(
+      "account_blocked",
+    );
+    expect(
+      (
+        await call(
+          "/api/state",
+          { profile: { name: "no", goal: 1, rest: 30 } },
+          { method: "PUT", cookie: target },
+        )
+      ).status,
+    ).toBe(401);
+    snapshot = await (
+      await call("/api/admin/users/person", undefined, { cookie: owner })
+    ).json();
+    expect(
+      (
+        await call(
+          "/api/admin/users/person",
+          adminUpdate(snapshot, { blocked: false }),
+          { method: "PUT", cookie: owner },
+        )
+      ).status,
+    ).toBe(200);
+    expect(
+      (
+        await call("/api/auth/login", {
+          email: "person@example.com",
+          password: "new pass 123",
+        })
+      ).status,
+    ).toBe(200);
+  });
+  it("rechecks session validity when a state write races admin session revocation", async () => {
+    const target = seedAdminUser("person", "person@example.com");
+    const batch = env.DB.batch.bind(env.DB);
+    env.DB.batch = async (statements) => {
+      env.DB.raw.exec("DELETE FROM sessions WHERE user_id='person'");
+      return batch(statements);
+    };
+    expect(
+      (
+        await call(
+          "/api/state",
+          { profile: { name: "old tab", goal: 1, rest: 30 } },
+          { method: "PUT", cookie: target },
+        )
+      ).status,
+    ).toBe(401);
+    expect(
+      env.DB.raw.prepare("SELECT COUNT(*) AS n FROM fitness_state").get().n,
+    ).toBe(0);
+  });
+  it("protects the owner, validates updates and rolls back email collisions", async () => {
+    const owner = seedAdminUser("owner", "uvukostya@gmail.com");
+    seedAdminUser("person", "person@example.com");
+    seedAdminUser("other", "other@example.com");
+    const snapshot = await (
+      await call("/api/admin/users/person", undefined, { cookie: owner })
+    ).json();
+    expect(
+      (
+        await call(
+          "/api/admin/users/owner",
+          { revision: 0, email: "uvukostya@gmail.com", confirmation: "DELETE" },
+          { method: "DELETE", cookie: owner },
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await call(
+          "/api/admin/users/person",
+          adminUpdate(snapshot, { email: "uvukostya@gmail.com" }),
+          { method: "PUT", cookie: owner },
+        )
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await call(
+          "/api/admin/users/person",
+          adminUpdate(snapshot, { isAdmin: true }),
+          { method: "PUT", cookie: owner },
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await call(
+          "/api/admin/users/person",
+          adminUpdate(snapshot, {}, { split: [] }),
+          { method: "PUT", cookie: owner },
+        )
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await call(
+          "/api/admin/users/person",
+          adminUpdate(snapshot, {
+            email: "other@example.com",
+            password: "new pass 123",
+          }),
+          { method: "PUT", cookie: owner },
+        )
+      ).status,
+    ).toBe(409);
+    expect(
+      env.DB.raw.prepare("SELECT revision FROM users WHERE id='person'").get()
+        .revision,
+    ).toBe(snapshot.user.revision);
+    expect(
+      env.DB.raw
+        .prepare("SELECT COUNT(*) AS n FROM sessions WHERE user_id='person'")
+        .get().n,
+    ).toBe(1);
+  });
+  it("email changes require verification and remove old identity and email tokens", async () => {
+    const owner = seedAdminUser("owner", "uvukostya@gmail.com");
+    seedAdminUser("person", "person@example.com");
+    env.DB.raw.exec(
+      "INSERT INTO identities VALUES('google','old-subject','person'); INSERT INTO email_tokens VALUES('old-reset','person','reset',9999999999999)",
+    );
+    const snapshot = await (
+      await call("/api/admin/users/person", undefined, { cookie: owner })
+    ).json();
+    expect(
+      (
+        await call(
+          "/api/admin/users/person",
+          adminUpdate(snapshot, { email: "new@example.com" }),
+          { method: "PUT", cookie: owner },
+        )
+      ).status,
+    ).toBe(400);
+    const response = await call(
+      "/api/admin/users/person",
+      adminUpdate(snapshot, {
+        email: "new@example.com",
+        emailVerified: true,
+        password: "new pass 123",
+      }),
+      { method: "PUT", cookie: owner },
+    );
+    expect(response.status).toBe(200);
+    expect((await response.json()).user.emailVerified).toBe(false);
+    expect(
+      env.DB.raw
+        .prepare("SELECT COUNT(*) AS n FROM identities WHERE user_id='person'")
+        .get().n,
+    ).toBe(0);
+    expect(
+      env.DB.raw
+        .prepare(
+          "SELECT COUNT(*) AS n FROM email_tokens WHERE user_id='person'",
+        )
+        .get().n,
+    ).toBe(0);
+    expect(
+      (
+        await (
+          await call("/api/auth/login", {
+            email: "new@example.com",
+            password: "new pass 123",
+          })
+        ).json()
+      ).verificationRequired,
+    ).toBe(true);
+  });
+  it("deletes only the confirmed target and keeps a credential-free audit trail", async () => {
+    const owner = seedAdminUser("owner", "uvukostya@gmail.com");
+    seedAdminUser("person", "person@example.com");
+    seedAdminUser("other", "other@example.com");
+    env.DB.raw.exec(
+      "INSERT INTO identities VALUES('google','person-google','person'); INSERT INTO email_tokens VALUES('reset','person','reset',9999999999999)",
+    );
+    const snapshot = await (
+      await call("/api/admin/users/person", undefined, { cookie: owner })
+    ).json();
+    const data = {
+      revision: snapshot.user.revision,
+      email: "wrong@example.com",
+      confirmation: "DELETE",
+    };
+    expect(
+      (
+        await call("/api/admin/users/person", data, {
+          method: "DELETE",
+          cookie: owner,
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (
+        await call(
+          "/api/admin/users/person",
+          { ...data, email: "person@example.com" },
+          { method: "DELETE", cookie: owner },
+        )
+      ).status,
+    ).toBe(200);
+    for (const table of [
+      "sessions",
+      "identities",
+      "email_tokens",
+      "fitness_state",
+    ])
+      expect(
+        env.DB.raw
+          .prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE user_id='person'`)
+          .get().n,
+      ).toBe(0);
+    expect(
+      env.DB.raw.prepare("SELECT id FROM users WHERE id='other'").get().id,
+    ).toBe("other");
+    const audit = await (
+      await call("/api/admin/audit", undefined, { cookie: owner })
+    ).json();
+    expect(audit.entries[0].action).toBe("delete_account");
+    expect(audit.entries[0].target_id).toBe("person");
+    expect(
+      (await call("/api/admin/users/person", undefined, { cookie: owner }))
+        .status,
+    ).toBe(404);
+  });
 });

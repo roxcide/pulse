@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
   BookOpen,
+  ShieldCheck,
   Activity,
   LayoutDashboard,
   Dumbbell,
@@ -34,6 +35,7 @@ import {
 import { useAuth } from "./auth/AuthProvider";
 import AccountPanel from "./account/AccountPanel";
 import ExerciseDetails from "./exercises/ExerciseDetails";
+import AdminPanel from "./admin/AdminPanel";
 import { ThemePicker } from "./theme";
 import { useUserData } from "./state/UserDataProvider";
 import { useStoredState } from "./hooks";
@@ -64,6 +66,7 @@ const navItems = [
   ["schedule", "Моё расписание", CalendarRange],
 ];
 const titles = {
+  admin: "Администрирование",
   dashboard: "Обзор",
   workout: "Тренировка",
   exercises: "Библиотека упражнений",
@@ -483,6 +486,15 @@ export default function App() {
             <span>{titles[page]}</span>
           </div>
           <div className="topbar-right">
+            {user.isAdmin && !isGuest && (
+              <button
+                className="icon-button"
+                aria-label="Админ-панель"
+                onClick={() => navigate("admin")}
+              >
+                <ShieldCheck size={20} />
+              </button>
+            )}
             <span className="demo-label">
               <span />
               {status === "saving"
@@ -565,6 +577,21 @@ export default function App() {
             </div>
           </div>
 
+          {page === "admin" &&
+            (user.isAdmin && !isGuest ? (
+              <AdminPanel />
+            ) : (
+              <div className="empty-state">
+                <ShieldCheck size={30} />
+                <h3>Раздел доступен только администратору</h3>
+                <button
+                  className="secondary-button"
+                  onClick={() => navigate("dashboard")}
+                >
+                  На главную
+                </button>
+              </div>
+            ))}
           {page === "dashboard" && (
             <>
               <div className="dashboard-top">

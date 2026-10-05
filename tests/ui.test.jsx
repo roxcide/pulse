@@ -897,3 +897,167 @@ it("deletes any set, recalculates progress, persists deletions and can add after
   expect(finished.history[0].sets).toBe(1);
   expect(finished.history[0].volume).toBe(200);
 });
+
+it("hides administration and never requests admin data for ordinary users and guests", async () => {
+  session = {
+    id: "one",
+    email: "uvukostya@gmail.com",
+    displayName: "Анна",
+    isAdmin: false,
+  };
+  window.history.replaceState({}, "", "/#admin");
+  const first = app();
+  await screen.findByText("Раздел доступен только администратору");
+  expect(screen.queryByRole("button", { name: "Админ-панель" })).toBeNull();
+  expect(requests.some((r) => r.path.startsWith("/api/admin/"))).toBe(false);
+  first.unmount();
+  session = null;
+  localStorage.setItem("pulse-guest-mode-v1", "true");
+  app();
+  await screen.findByText("Раздел доступен только администратору");
+  expect(requests.some((r) => r.path.startsWith("/api/admin/"))).toBe(false);
+});
+
+it("admin searches, validates and saves edits, then requires exact email confirmation for deletion", async () => {
+  session = {
+    id: "admin",
+    email: "uvukostya@gmail.com",
+    displayName: "Админ",
+    isAdmin: true,
+  };
+  let person = {
+    id: "person",
+    email: "person@example.com",
+    displayName: "Анна",
+    emailVerified: true,
+    blocked: false,
+    createdAt: Date.now(),
+    revision: 0,
+    hasPassword: true,
+    isAdmin: false,
+  };
+  let personState = {};
+  const original = fetch;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (path, options = {}) => {
+      if (!path.startsWith("/api/admin/")) return original(path, options);
+      const body = options.body ? JSON.parse(options.body) : null;
+      requests.push({
+        path,
+        method: options.method,
+        body,
+        headers: options.headers,
+      });
+      if (path.startsWith("/api/admin/users?"))
+        return Response.json({
+          users: person ? [person] : [],
+          total: person ? 1 : 0,
+          page: 0,
+          pageSize: 25,
+        });
+      if (path === "/api/admin/audit") return Response.json({ entries: [] });
+      if (path === "/api/admin/users/person") {
+        if (options.method === "PUT") {
+          person = {
+            ...person,
+            ...body.account,
+            revision: person.revision + 1,
+          };
+          personState = body.state;
+        }
+        if (options.method === "DELETE") {
+          person = null;
+          return Response.json({ ok: true });
+        }
+        return Response.json({
+          user: person,
+          state: personState,
+          providers: [],
+        });
+      }
+      return Response.json({ error: "not_found" }, { status: 404 });
+    }),
+  );
+  const user = userEvent.setup();
+  app();
+  await user.click(await screen.findByRole("button", { name: "Админ-панель" }));
+  await screen.findByRole("button", { name: /person@example.com/ });
+  await user.type(
+    screen.getByLabelText("Поиск пользователей"),
+    "person@example.com",
+  );
+  await user.click(screen.getByRole("button", { name: "Найти", exact: true }));
+  await waitFor(() =>
+    expect(
+      requests.some((r) => r.path.includes("q=person%40example.com")),
+    ).toBe(true),
+  );
+  await user.click(
+    await screen.findByRole("button", { name: /person@example.com/ }),
+  );
+  await screen.findByRole("dialog", { name: "Управление пользователем" });
+  await user.clear(screen.getByLabelText("Имя пользователя"));
+  await user.type(screen.getByLabelText("Имя пользователя"), "Мария");
+  // Typing should not lose focus to the modal close button.
+  expect(screen.getByLabelText("Имя пользователя").value).toBe("Мария");
+  fireEvent.change(screen.getByLabelText("Тренировочных дней в неделю"), {
+    target: { value: "4" },
+  });
+  await user.click(screen.getByText("Все тренировочные данные · JSON"));
+  fireEvent.change(screen.getByLabelText("История тренировок"), {
+    target: { value: "invalid JSON" },
+  });
+  await user.click(
+    screen.getByRole("button", { name: "Сохранить пользователя" }),
+  );
+  expect((await screen.findByRole("alert")).textContent).toContain(
+    "Проверь JSON",
+  );
+  expect(
+    requests.some(
+      (r) => r.method === "PUT" && r.path.startsWith("/api/admin/"),
+    ),
+  ).toBe(false);
+  fireEvent.change(screen.getByLabelText("История тренировок"), {
+    target: { value: "[]" },
+  });
+  await user.click(
+    screen.getByRole("button", { name: "Сохранить пользователя" }),
+  );
+  await screen.findByText(
+    "Пользователь обновлён. Его предыдущие сессии завершены.",
+  );
+  expect(personState.profile).toEqual({ name: "Мария", goal: 4, rest: 90 });
+  const request = requests.find(
+    (r) => r.path === "/api/admin/users/person" && r.method === "PUT",
+  );
+  expect(request.headers["X-Pulse-Account"]).toBe("admin");
+  expect(request.body.account).not.toHaveProperty("password");
+  await user.click(
+    screen.getByRole("button", { name: "Удалить пользователя" }),
+  );
+  expect(
+    screen.getByText(/Восстановить их через сайт невозможно/),
+  ).toBeTruthy();
+  await user.type(
+    screen.getByLabelText("Email удаляемого аккаунта"),
+    "wrong@example.com",
+  );
+  expect(
+    screen.getByRole("button", { name: "Удалить навсегда" }).disabled,
+  ).toBe(true);
+  await user.clear(screen.getByLabelText("Email удаляемого аккаунта"));
+  await user.type(
+    screen.getByLabelText("Email удаляемого аккаунта"),
+    "person@example.com",
+  );
+  await user.click(screen.getByRole("button", { name: "Удалить навсегда" }));
+  await screen.findByText("Аккаунт удалён безвозвратно.");
+  expect(person).toBeNull();
+  expect(requests.find((r) => r.method === "DELETE").body).toEqual({
+    revision: 1,
+    email: "person@example.com",
+    confirmation: "DELETE",
+  });
+});

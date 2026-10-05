@@ -15,7 +15,7 @@ export async function pendingVerification(request, env) {
   const challenge = readCookie(request, env, "verification");
   if (!/^[\w-]{43}$/.test(challenge)) return null;
   const user = await env.DB.prepare(
-    "SELECT users.* FROM users JOIN email_tokens ON users.id = email_tokens.user_id WHERE token_hash = ? AND kind = 'pending' AND expires_at > ? AND email_verified = 0",
+    "SELECT users.* FROM users JOIN email_tokens ON users.id = email_tokens.user_id WHERE token_hash = ? AND kind = 'pending' AND expires_at > ? AND email_verified = 0 AND blocked = 0",
   )
     .bind(await hash(challenge), Date.now())
     .first();
@@ -117,7 +117,7 @@ export async function verificationRoute(request, env, path, data) {
       ...args,
     ),
     env.DB.prepare(
-      `INSERT INTO sessions SELECT ?, id, ? FROM users WHERE email_verified = 0 AND id IN (${guard}) RETURNING user_id`,
+      `INSERT INTO sessions SELECT ?, id, ? FROM users WHERE email_verified = 0 AND blocked = 0 AND id IN (${guard}) RETURNING user_id`,
     ).bind(await hash(session), now + 604800000, ...args),
     env.DB.prepare(
       `UPDATE users SET email_verified = 1 WHERE id IN (${guard})`,
@@ -127,7 +127,9 @@ export async function verificationRoute(request, env, path, data) {
     ),
   ]);
   if (!results[1].results.length) fail(400, "invalid_code");
-  const response = Response.json({ user: safeUser(user) });
+  const response = Response.json({
+    user: safeUser({ ...user, email_verified: 1 }),
+  });
   response.headers.append("Set-Cookie", cookie(env, "session", session));
   response.headers.append("Set-Cookie", cookie(env, "verification", "", 0));
   return response;

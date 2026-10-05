@@ -20,6 +20,7 @@ import { authConfig, errorCode } from "./diagnostics.js";
 import { validateState } from "./state.js";
 import { requireMail } from "./mail.js";
 import { emailAuth } from "./email-auth.js";
+import { adminRoute } from "./admin.js";
 import {
   pendingVerification,
   startVerification,
@@ -48,6 +49,7 @@ async function route(request, env) {
     return oauthCallback(request, env, callback[1]);
   }
   const oauth = path.match(/^\/api\/auth\/oauth\/(google)$/);
+  if (path.startsWith("/api/admin/")) return adminRoute(request, env);
   const ip = request.headers.get("CF-Connecting-IP") || "local";
   if (oauth && method === "GET") {
     await limit(env, `oauth:${ip}`, 30);
@@ -105,13 +107,23 @@ async function route(request, env) {
     if (method === "PUT") {
       await limit(env, `state:${user.id}`, 240, 60);
       const entries = validateState(await body(request, 2 * 1024 * 1024));
-      await env.DB.batch(
+      const tokenHash = await hash(readCookie(request, env));
+      const saved = await env.DB.batch(
         entries.map(([key, value]) =>
           env.DB.prepare(
-            "INSERT INTO fitness_state VALUES(?,?,?) ON CONFLICT(user_id,key) DO UPDATE SET value = excluded.value",
-          ).bind(user.id, key, JSON.stringify(value)),
+            "INSERT INTO fitness_state SELECT ?,?,? WHERE EXISTS(SELECT 1 FROM sessions WHERE token_hash=? AND user_id=? AND expires_at>?) ON CONFLICT(user_id,key) DO UPDATE SET value = excluded.value RETURNING key",
+          ).bind(
+            user.id,
+            key,
+            JSON.stringify(value),
+            tokenHash,
+            user.id,
+            Date.now(),
+          ),
         ),
       );
+      if (saved.some((result) => !result.results.length))
+        fail(401, "unauthorized");
       return json({ ok: true });
     }
   }
@@ -163,6 +175,7 @@ async function route(request, env) {
       .first();
     if (!(await passwordMatches(data.password, user?.password_hash)))
       fail(401, "invalid_credentials");
+    if (user.blocked) fail(403, "account_blocked");
     if (!user.email_verified) return startVerification(env, user);
     return json({ user: safeUser(user) }, 200, {
       "Set-Cookie": await newSession(env, user),

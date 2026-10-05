@@ -1,5 +1,6 @@
 import { scrypt, timingSafeEqual } from "node:crypto";
 import { Buffer } from "node:buffer";
+import { isAdmin } from "./admin-access.js";
 
 export class HttpError extends Error {
   constructor(status, code) {
@@ -125,20 +126,24 @@ export const safeUser = (user) => ({
   id: user.id,
   email: user.email,
   displayName: user.display_name,
+  isAdmin: isAdmin(user),
 });
 export async function currentUser(request, env) {
   const token = readCookie(request, env);
   if (!token) return null;
   return env.DB.prepare(
-    "SELECT users.* FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.token_hash = ? AND sessions.expires_at > ?",
+    "SELECT users.* FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.token_hash = ? AND sessions.expires_at > ? AND users.blocked = 0 AND users.email_verified = 1",
   )
     .bind(await hash(token), Date.now())
     .first();
 }
 export async function newSession(env, user) {
   const token = randomToken();
-  await env.DB.prepare("INSERT INTO sessions VALUES(?,?,?)")
-    .bind(await hash(token), user.id, Date.now() + 604800000)
-    .run();
+  const created = await env.DB.prepare(
+    "INSERT INTO sessions SELECT ?,id,? FROM users WHERE id=? AND blocked=0 AND email_verified=1 RETURNING user_id",
+  )
+    .bind(await hash(token), Date.now() + 604800000, user.id)
+    .first();
+  if (!created) fail(403, "account_blocked");
   return cookie(env, "session", token);
 }

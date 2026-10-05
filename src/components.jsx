@@ -58,9 +58,11 @@ export function Modal({ title, children, onClose, busy = false }) {
       if (e.key === "Tab") {
         const els = [
           ...dialog.querySelectorAll(
-            'button,input,select,textarea,[tabindex="0"]',
+            'button,input,select,textarea,summary,a[href],[tabindex="0"]',
           ),
-        ].filter((el) => !el.disabled);
+        ].filter(
+          (el) => !el.matches(":disabled") && el.getClientRects().length > 0,
+        );
         const first = els[0],
           last = els.at(-1);
         if (e.shiftKey && document.activeElement === first) {
