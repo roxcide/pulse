@@ -1931,6 +1931,34 @@ h1 {
 .program-exercise-list {
   margin: 22px 0;
 }
+.program-reps {
+  white-space: nowrap;
+}
+.program-guidance {
+  padding: 18px;
+  margin-bottom: 22px;
+  background: var(--theme-surface, #1b2018);
+  border: 1px solid var(--theme-border, #344728);
+  border-radius: 12px;
+  line-height: 1.65;
+}
+.program-guidance h3 {
+  margin: 0 0 8px;
+  font-size: 14px;
+}
+.program-guidance p {
+  margin: 0 0 12px;
+  font-size: 13px;
+  color: var(--theme-muted, #8faa75);
+}
+.program-guidance a {
+  display: inline;
+  font-size: 12px;
+  color: var(--theme-accent, #c5f578);
+}
+.program-guidance a svg {
+  vertical-align: middle;
+}
 .program-exercise-list > div {
   display: flex;
   align-items: center;

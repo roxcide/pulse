@@ -34,6 +34,10 @@ import {
 } from "lucide-react";
 import { useAuth } from "./auth/AuthProvider";
 import AccountPanel from "./account/AccountPanel";
+import {
+  buildWorkoutExercises,
+  exercisePrescription,
+} from "./programs/catalog";
 import ExerciseDetails from "./exercises/ExerciseDetails";
 import AdminPanel from "./admin/AdminPanel";
 import { ThemePicker } from "./theme";
@@ -173,6 +177,7 @@ export default function App() {
       return;
     }
     const list = ids || splitExercises[name] || programs[0].exercises;
+    const program = programs.find((item) => item.name === name);
     setNow(Date.now());
     setActive({
       id: crypto.randomUUID(),
@@ -180,17 +185,7 @@ export default function App() {
       date: today,
       startedAt: Date.now(),
       restEndsAt: null,
-      exercises: list.map((id) => {
-        const e = exercises.find((e) => e.id === id);
-        return {
-          ...e,
-          sets: Array.from({ length: 3 }, () => ({
-            reps: e.reps,
-            weight: e.weight,
-            done: false,
-          })),
-        };
-      }),
+      exercises: buildWorkoutExercises(list, exercises, program),
     });
     navigate("workout");
     setModal(null);
@@ -292,10 +287,10 @@ export default function App() {
       (gear === "Любое оборудование" || e.equipment === gear),
   );
 
-  function ProgramCards() {
+  function ProgramCards({ featured = false }) {
     return (
       <div className="program-grid">
-        {programs.map((p, i) => (
+        {(featured ? programs.slice(0, 3) : programs).map((p, i) => (
           <button
             className="program-card"
             key={p.id}
@@ -305,7 +300,7 @@ export default function App() {
               className="program-photo"
               style={{ backgroundImage: `url(${p.image})` }}
             >
-              <span className={`program-tag tag-${i}`}>{p.tag}</span>
+              <span className={`program-tag tag-${i % 3}`}>{p.tag}</span>
               <span className="program-open">
                 <ArrowUpRight size={19} />
               </span>
@@ -748,7 +743,7 @@ export default function App() {
                     action="Все программы"
                     onAction={() => navigate("programs")}
                   />
-                  <ProgramCards />
+                  <ProgramCards featured />
                 </section>
                 <section className="mini-calendar-section">
                   <SectionHeading
@@ -1824,14 +1819,40 @@ export default function App() {
                 {modal.program.level}
               </p>
               <div className="program-exercise-list">
-                {modal.program.exercises.map((id, i) => (
-                  <div key={id}>
-                    <span>{String(i + 1).padStart(2, "0")}</span>
-                    <strong>{exercises.find((e) => e.id === id)?.name}</strong>
-                    <span>3 × {exercises.find((e) => e.id === id)?.reps}</span>
-                  </div>
-                ))}
+                {modal.program.exercises.map((id, i) => {
+                  const exercise = exercises.find((e) => e.id === id);
+                  const plan = exercisePrescription(modal.program, exercise);
+                  return (
+                    <div key={id}>
+                      <span>{String(i + 1).padStart(2, "0")}</span>
+                      <strong>{exercise.name}</strong>
+                      <span className="program-reps">
+                        {plan.sets} × {plan.reps}
+                        {plan.maxReps ? `–${plan.maxReps}` : ""}
+                      </span>
+                    </div>
+                  );
+                })}
               </div>
+              {modal.program.notes && (
+                <div className="program-guidance">
+                  <h3>Как тренироваться</h3>
+                  <p>{modal.program.notes}</p>
+                  <p>
+                    В плане указаны рабочие подходы. При запуске подставляется
+                    нижняя граница повторений; вес и повторения можно изменить.
+                    Время программы — ориентир.
+                  </p>
+                  <a
+                    href={modal.program.source}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                  >
+                    Основа: Muscle &amp; Strength · адаптация для Pulse{" "}
+                    <ArrowUpRight size={14} />
+                  </a>
+                </div>
+              )}
               <button
                 className="primary-button full-width"
                 onClick={() =>

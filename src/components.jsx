@@ -15,6 +15,7 @@ import {
 import { dateKey, dayNames, addDays, monday } from "./data";
 
 export function MuscleIcon({ muscle, ...props }) {
+  muscle = { Push: "Грудь", Pull: "Спина", Legs: "Ноги" }[muscle] || muscle;
   const Icon =
     muscle === "Ноги"
       ? Footprints

@@ -1,4 +1,5 @@
 import { additionalExercises } from "./exercises/catalog";
+import { pplPrograms } from "./programs/catalog";
 
 export const muscles = [
   "Все группы",
@@ -167,6 +168,7 @@ export const programs = [
     image: "/images/cardio.jpg",
     exercises: ["lunge", "pushups", "squat", "crunch"],
   },
+  ...pplPrograms,
 ];
 export const splitOptions = [
   "Не запланировано",
@@ -175,6 +177,7 @@ export const splitOptions = [
   "Спина · Бицепс",
   "Грудь · Трицепс",
   "Full Body",
+  ...pplPrograms.map((program) => program.name),
 ];
 export const defaultSplit = Array(7).fill("Не запланировано");
 export const splitExercises = {
@@ -182,6 +185,9 @@ export const splitExercises = {
   "Спина · Бицепс": ["pulldown", "row", "curl", "crunch"],
   "Грудь · Трицепс": ["bench", "incline", "fly", "triceps", "pushups"],
   "Full Body": programs[0].exercises,
+  ...Object.fromEntries(
+    pplPrograms.map((program) => [program.name, program.exercises]),
+  ),
 };
 export const dayNames = ["Пн", "Вт", "Ср", "Чт", "Пт", "Сб", "Вс"];
 export const fullDayNames = [

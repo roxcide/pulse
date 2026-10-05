@@ -13,8 +13,83 @@ import AuthGate from "../src/auth/AuthGate";
 import { newAccountState } from "../src/state/defaults";
 import { ThemeProvider } from "../src/theme";
 import * as avatarTools from "../src/account/avatar";
+import { pplPrograms, buildWorkoutExercises } from "../src/programs/catalog";
+import {
+  splitOptions,
+  splitExercises,
+  programs,
+  initialExercises,
+} from "../src/data";
 
 let requests, saved, session, failSave, failLoad;
+
+it.each(pplPrograms)(
+  "starts $name with the displayed prescription and preserves personal weights",
+  async (program) => {
+    localStorage.setItem("pulse-guest-mode-v1", "true");
+    const state = newAccountState({ displayName: "Тест" });
+    state.exercises.find((e) => e.id === program.exercises[0]).weight = 20;
+    localStorage.setItem("pulse-guest-data-v1", JSON.stringify(state));
+    window.history.replaceState({}, "", "/#programs");
+    app();
+    await userEvent.click(
+      await screen.findByRole("button", {
+        name: new RegExp(`${program.eyebrow} ${program.name} `),
+      }),
+    );
+    await screen.findByRole("dialog", { name: program.name });
+    const preview = screen.getByRole("dialog", { name: program.name });
+    for (const id of program.exercises) {
+      const plan = program.prescription[id];
+      expect(preview.textContent).toContain(
+        `${plan.sets} × ${plan.reps}–${plan.maxReps}`,
+      );
+    }
+    await userEvent.click(
+      screen.getByRole("button", { name: "Начать программу" }),
+    );
+    const saved = JSON.parse(localStorage.getItem("pulse-guest-data-v1"));
+    expect(saved.active.name).toBe(program.name);
+    expect(saved.active.exercises.map((e) => e.id)).toEqual(program.exercises);
+    for (const exercise of saved.active.exercises) {
+      const plan = program.prescription[exercise.id];
+      expect(exercise.sets).toHaveLength(plan.sets);
+      expect(exercise.sets.every((s) => s.reps === plan.reps && !s.done)).toBe(
+        true,
+      );
+    }
+    expect(saved.active.exercises[0].sets[0].weight).toBe(20);
+    expect(saved.history).toEqual([]);
+    expect(saved.exercises).toEqual(state.exercises);
+    cleanup();
+    app();
+    await screen.findByRole("heading", { name: program.name, exact: true });
+    expect(
+      JSON.parse(localStorage.getItem("pulse-guest-data-v1")).active,
+    ).toEqual(saved.active);
+  },
+);
+
+it("resolves PPL from schedule names and keeps old templates compatible", () => {
+  for (const program of pplPrograms) {
+    expect(splitOptions).toContain(program.name);
+    const resolved = programs.find((p) => p.name === program.name);
+    expect(
+      buildWorkoutExercises(
+        splitExercises[program.name],
+        initialExercises,
+        resolved,
+      ),
+    ).toEqual(
+      buildWorkoutExercises(program.exercises, initialExercises, program),
+    );
+  }
+  expect(
+    buildWorkoutExercises(["bench"], initialExercises, programs[0])[0].sets,
+  ).toEqual(
+    Array.from({ length: 3 }, () => ({ reps: 10, weight: 0, done: false })),
+  );
+});
 
 beforeEach(() => {
   requests = [];
