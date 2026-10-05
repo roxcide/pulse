@@ -32,7 +32,12 @@ const validators = {
     v.name.trim() &&
     Number.isInteger(v.goal) &&
     number(v.goal, 7) &&
-    number(v.rest, 600),
+    number(v.rest, 600) &&
+    (v.weight == null || (number(v.weight, 500) && v.weight >= 1)) &&
+    (v.avatar === undefined ||
+      v.avatar === "" ||
+      (text(v.avatar, 200000) &&
+        /^data:image\/jpeg;base64,\/9j\/[A-Za-z0-9+/]*={0,2}$/.test(v.avatar))),
   exercises: (v) => array(v, 1000, exercise),
   split: (v) =>
     Array.isArray(v) && v.length === 7 && v.every((s) => text(s, 100)),

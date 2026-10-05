@@ -468,7 +468,11 @@ export default function App() {
             onClick={() => setModal({ type: "account" })}
           >
             <div className="avatar">
-              {profile.name.slice(0, 1).toUpperCase()}
+              {profile.avatar ? (
+                <img src={profile.avatar} alt="" />
+              ) : (
+                profile.name.slice(0, 1).toUpperCase()
+              )}
             </div>
             <div>
               <strong>{profile.name}</strong>
@@ -514,7 +518,7 @@ export default function App() {
             </button>
             <button
               className="icon-button"
-              aria-label="Настройки профиля"
+              aria-label="Открыть настройки"
               onClick={() => setModal({ type: "settings" })}
             >
               <Settings size={19} />
@@ -524,7 +528,11 @@ export default function App() {
               aria-label="Аккаунт"
               onClick={() => setModal({ type: "account" })}
             >
-              {profile.name.slice(0, 1).toUpperCase()}
+              {profile.avatar ? (
+                <img src={profile.avatar} alt="" />
+              ) : (
+                profile.name.slice(0, 1).toUpperCase()
+              )}
             </button>
           </div>
         </header>
@@ -1534,7 +1542,7 @@ export default function App() {
             {
               settings: "Твои настройки",
               goal: "Твоя недельная цель",
-              account: "Твой аккаунт",
+              account: "Личный профиль",
               exercise: "Новое упражнение",
               exerciseDetails: modal.exercise?.name,
               split: fullDayNames[modal.day],
@@ -1568,7 +1576,13 @@ export default function App() {
             />
           )}
           {modal.type === "account" && (
-            <AccountPanel onBusyChange={setAccountBusy} />
+            <AccountPanel
+              onBusyChange={setAccountBusy}
+              onSaved={() => {
+                setModal(null);
+                notify("Профиль обновлён");
+              }}
+            />
           )}
           {modal.type === "settings" && (
             <>
@@ -1579,22 +1593,12 @@ export default function App() {
                   const data = new FormData(e.currentTarget);
                   setProfile((previous) => ({
                     ...previous,
-                    name: data.get("name").trim() || "Атлет",
                     rest: Number(data.get("rest")),
                   }));
                   setModal(null);
                   notify("Настройки сохранены");
                 }}
               >
-                <label className="form-field">
-                  Как тебя зовут
-                  <input
-                    name="name"
-                    defaultValue={profile.name}
-                    maxLength="24"
-                    required
-                  />
-                </label>
                 <label className="form-field">
                   Отдых между подходами
                   <select name="rest" defaultValue={profile.rest}>

@@ -12,6 +12,7 @@ import { AuthProvider } from "../src/auth/AuthProvider";
 import AuthGate from "../src/auth/AuthGate";
 import { newAccountState } from "../src/state/defaults";
 import { ThemeProvider } from "../src/theme";
+import * as avatarTools from "../src/account/avatar";
 
 let requests, saved, session, failSave, failLoad;
 
@@ -72,6 +73,78 @@ function app() {
     </ThemeProvider>,
   );
 }
+
+it("saves profile weight and avatar, restores them and can remove the photo", async () => {
+  session = { id: "one", email: "one@example.com", displayName: "Анна" };
+  const avatar = "data:image/jpeg;base64,/9j/AAAA";
+  const prepare = vi
+    .spyOn(avatarTools, "prepareAvatar")
+    .mockResolvedValue(avatar);
+  try {
+    app();
+    await screen.findByText("Выбери недельную цель");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Аккаунт", exact: true }),
+    );
+    fireEvent.change(screen.getByLabelText("Имя или ник"), {
+      target: { value: "Новый ник" },
+    });
+    fireEvent.change(screen.getByLabelText("Вес, кг"), {
+      target: { value: "72.5" },
+    });
+    await userEvent.upload(
+      screen.getByLabelText("Загрузить аватарку"),
+      new File(["photo"], "me.png", { type: "image/png" }),
+    );
+    await screen.findByAltText("Твоя аватарка");
+    await userEvent.click(
+      screen.getByRole("button", { name: "Сохранить профиль" }),
+    );
+    await waitFor(() =>
+      expect(saved.profile).toEqual({
+        name: "Новый ник",
+        weight: 72.5,
+        avatar,
+        rest: 90,
+        goal: 0,
+      }),
+    );
+    expect(session.id).toBe("one");
+    cleanup();
+    app();
+    await screen.findByText("Выбери недельную цель");
+    expect(
+      document.querySelector(".topbar .avatar img").getAttribute("src"),
+    ).toBe(avatar);
+    await userEvent.click(
+      screen.getByRole("button", { name: "Аккаунт", exact: true }),
+    );
+    expect(screen.getByLabelText("Вес, кг").value).toBe("72.5");
+    await userEvent.click(screen.getByRole("button", { name: "Удалить фото" }));
+    fireEvent.change(screen.getByLabelText("Вес, кг"), {
+      target: { value: "" },
+    });
+    await userEvent.click(
+      screen.getByRole("button", { name: "Сохранить профиль" }),
+    );
+    await waitFor(() => expect(saved.profile.avatar).toBe(""));
+    expect(saved.profile.weight).toBeNull();
+    expect(document.querySelector(".topbar .avatar img")).toBeNull();
+  } finally {
+    prepare.mockRestore();
+  }
+});
+
+it("rejects unsupported and oversized photos before decoding", async () => {
+  await expect(
+    avatarTools.prepareAvatar(
+      new File(["<svg/>"], "x.svg", { type: "image/svg+xml" }),
+    ),
+  ).rejects.toThrow("JPG");
+  await expect(
+    avatarTools.prepareAvatar({ type: "image/jpeg", size: 9 * 1024 * 1024 }),
+  ).rejects.toThrow("8 МБ");
+});
 it("creates fresh independent account defaults with no invented personal data", () => {
   const a = newAccountState({ displayName: "Анна" }),
     b = newAccountState({ displayName: "Иван" });
@@ -175,19 +248,19 @@ it("retains changes on failed save and prevents logout until retry succeeds", as
   app();
   await screen.findByText("Выбери недельную цель");
   await userEvent.click(
-    screen.getByRole("button", { name: "Настройки", exact: true }),
+    screen.getByRole("button", { name: "Аккаунт", exact: true }),
   );
-  fireEvent.change(screen.getByLabelText("Как тебя зовут"), {
+  fireEvent.change(screen.getByLabelText("Имя или ник"), {
     target: { value: "Новое имя" },
   });
   await userEvent.click(
-    screen.getByRole("button", { name: /Сохранить настройки/ }),
+    screen.getByRole("button", { name: /Сохранить профиль/ }),
   );
   await screen.findByRole("alert");
   await userEvent.click(
     screen.getByRole("button", { name: "Настройки", exact: true }),
   );
-  if (!screen.queryByRole("dialog", { name: "Твой аккаунт" })) {
+  if (!screen.queryByRole("dialog", { name: "Личный профиль" })) {
     await userEvent.click(
       screen.getByRole("button", { name: "Закрыть", exact: true }),
     );
@@ -204,7 +277,7 @@ it("retains changes on failed save and prevents logout until retry succeeds", as
     screen.getByRole("button", { name: "Повторить", exact: true }),
   );
   await waitFor(() => expect(saved.profile.name).toBe("Новое имя"));
-  if (!screen.queryByRole("dialog", { name: "Твой аккаунт" })) {
+  if (!screen.queryByRole("dialog", { name: "Личный профиль" })) {
     await userEvent.click(
       screen.getByRole("button", { name: "Закрыть", exact: true }),
     );
@@ -301,13 +374,13 @@ it("persists guest settings across reloads without calling the account API", asy
   await screen.findByText("Выбери недельную цель");
   expect(fetch).not.toHaveBeenCalled();
   await userEvent.click(
-    screen.getByRole("button", { name: "Настройки", exact: true }),
+    screen.getByRole("button", { name: "Аккаунт", exact: true }),
   );
-  fireEvent.change(screen.getByLabelText("Как тебя зовут"), {
+  fireEvent.change(screen.getByLabelText("Имя или ник"), {
     target: { value: "Локальный атлет" },
   });
   await userEvent.click(
-    screen.getByRole("button", { name: /Сохранить настройки/ }),
+    screen.getByRole("button", { name: /Сохранить профиль/ }),
   );
   expect(
     JSON.parse(localStorage.getItem("pulse-guest-data-v1")).profile.name,
@@ -321,7 +394,7 @@ it("persists guest settings across reloads without calling the account API", asy
   await userEvent.click(
     screen.getByRole("button", { name: "Настройки", exact: true }),
   );
-  if (!screen.queryByRole("dialog", { name: "Твой аккаунт" })) {
+  if (!screen.queryByRole("dialog", { name: "Личный профиль" })) {
     await userEvent.click(
       screen.getByRole("button", { name: "Закрыть", exact: true }),
     );
@@ -371,13 +444,13 @@ it("keeps unsaved guest changes visible when browser storage is full", async () 
       throw new Error("quota");
     });
   await userEvent.click(
-    screen.getByRole("button", { name: "Настройки", exact: true }),
+    screen.getByRole("button", { name: "Аккаунт", exact: true }),
   );
-  fireEvent.change(screen.getByLabelText("Как тебя зовут"), {
+  fireEvent.change(screen.getByLabelText("Имя или ник"), {
     target: { value: "Не потерять" },
   });
   await userEvent.click(
-    screen.getByRole("button", { name: /Сохранить настройки/ }),
+    screen.getByRole("button", { name: /Сохранить профиль/ }),
   );
   expect((await screen.findByRole("alert")).textContent).toContain(
     "не разрешил сохранить",
@@ -385,7 +458,7 @@ it("keeps unsaved guest changes visible when browser storage is full", async () 
   await userEvent.click(
     screen.getByRole("button", { name: "Настройки", exact: true }),
   );
-  if (!screen.queryByRole("dialog", { name: "Твой аккаунт" })) {
+  if (!screen.queryByRole("dialog", { name: "Личный профиль" })) {
     await userEvent.click(
       screen.getByRole("button", { name: "Закрыть", exact: true }),
     );
@@ -396,7 +469,7 @@ it("keeps unsaved guest changes visible when browser storage is full", async () 
   await userEvent.click(
     screen.getByRole("button", { name: "Войти или зарегистрироваться" }),
   );
-  expect(screen.getByRole("heading", { name: "Твой аккаунт" })).toBeTruthy();
+  expect(screen.getByRole("heading", { name: "Личный профиль" })).toBeTruthy();
   blocked.mockRestore();
   await userEvent.click(
     screen.getByRole("button", { name: "Повторить", exact: true }),
@@ -547,9 +620,7 @@ it("edits goals separately from settings and preserves unrelated fields", async 
   expect(
     screen.queryByLabelText("Цель: тренировочных дней в неделю"),
   ).toBeNull();
-  fireEvent.change(screen.getByLabelText("Как тебя зовут"), {
-    target: { value: "Атлет" },
-  });
+  expect(screen.queryByLabelText("Имя или ник")).toBeNull();
   fireEvent.change(screen.getByLabelText("Отдых между подходами"), {
     target: { value: "120" },
   });
@@ -558,7 +629,7 @@ it("edits goals separately from settings and preserves unrelated fields", async 
   );
   expect(
     JSON.parse(localStorage.getItem("pulse-guest-data-v1")).profile,
-  ).toEqual({ name: "Атлет", rest: 120, goal: 4 });
+  ).toEqual({ name: "Гость", rest: 120, goal: 4 });
   await userEvent.click(screen.getByRole("button", { name: "Изменить цель" }));
   fireEvent.change(screen.getByLabelText("Цель: тренировочных дней в неделю"), {
     target: { value: "2" },
@@ -566,7 +637,7 @@ it("edits goals separately from settings and preserves unrelated fields", async 
   await userEvent.click(screen.getByRole("button", { name: "Сохранить цель" }));
   expect(
     JSON.parse(localStorage.getItem("pulse-guest-data-v1")).profile,
-  ).toEqual({ name: "Атлет", rest: 120, goal: 2 });
+  ).toEqual({ name: "Гость", rest: 120, goal: 2 });
 });
 it("requires deletion confirmation and retains the account after failure", async () => {
   session = { id: "one", email: "one@example.com", displayName: "Анна" };
@@ -664,13 +735,13 @@ it("waits for an in-flight save before deletion even when that save fails", asyn
   app();
   await screen.findByText("Выбери недельную цель");
   await userEvent.click(
-    screen.getByRole("button", { name: "Настройки", exact: true }),
+    screen.getByRole("button", { name: "Аккаунт", exact: true }),
   );
-  fireEvent.change(screen.getByLabelText("Как тебя зовут"), {
+  fireEvent.change(screen.getByLabelText("Имя или ник"), {
     target: { value: "Новое имя" },
   });
   await userEvent.click(
-    screen.getByRole("button", { name: "Сохранить настройки" }),
+    screen.getByRole("button", { name: "Сохранить профиль" }),
   );
   await waitFor(() => expect(finishSave).toBeTypeOf("function"));
   await userEvent.click(

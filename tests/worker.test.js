@@ -919,6 +919,45 @@ function adminUpdate(snapshot, account = {}, state = {}) {
 }
 
 describe("admin access and account management", () => {
+  it("persists optional profile fields and rejects invalid weight and avatar payloads", async () => {
+    const cookie = seedAdminUser("person", "person@example.com");
+    const profile = {
+      name: "Ник",
+      goal: 3,
+      rest: 90,
+      weight: 72.5,
+      avatar: "data:image/jpeg;base64,/9j/AAAA",
+    };
+    expect(
+      (await call("/api/state", { profile }, { method: "PUT", cookie })).status,
+    ).toBe(200);
+    expect(
+      (await (await call("/api/state", undefined, { cookie })).json()).state
+        .profile,
+    ).toEqual(profile);
+    for (const patch of [
+      { weight: -1 },
+      { weight: 501 },
+      { weight: "72" },
+      { avatar: "https://example.com/me.jpg" },
+      { avatar: "data:image/svg+xml;base64,PHN2Zz4=" },
+      { avatar: "data:image/jpeg;base64,/9j/" + "A".repeat(200000) },
+    ]) {
+      expect(
+        (
+          await call(
+            "/api/state",
+            { profile: { ...profile, ...patch } },
+            { method: "PUT", cookie },
+          )
+        ).status,
+      ).toBe(400);
+    }
+    expect(
+      (await (await call("/api/state", undefined, { cookie })).json()).state
+        .profile,
+    ).toEqual(profile);
+  });
   it("keeps all sessions through profile, fitness, email and verification edits", async () => {
     const owner = seedAdminUser("owner", "uvukostya@gmail.com");
     const target = seedAdminUser("person", "person@example.com");

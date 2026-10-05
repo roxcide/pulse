@@ -3,8 +3,9 @@ import { Trash2, LogOut } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
 import { useUserData } from "../state/UserDataProvider";
 import { authError } from "../auth/client";
+import ProfileEditor from "./ProfileEditor";
 
-export default function AccountPanel({ onBusyChange }) {
+export default function AccountPanel({ onBusyChange, onSaved }) {
   const { user, isGuest } = useAuth();
   const { signOut, removeAccount } = useUserData();
   const [confirming, setConfirming] = useState(false);
@@ -82,6 +83,13 @@ export default function AccountPanel({ onBusyChange }) {
     );
   return (
     <div className="account-panel">
+      <ProfileEditor
+        onBusyChange={(value) => {
+          setBusy(value);
+          onBusyChange(value);
+        }}
+        onSaved={onSaved}
+      />
       <p className="form-hint">
         {isGuest
           ? "Гостевой прогресс хранится в этом браузере. Выход не удалит его и не перенесёт в аккаунт."
@@ -90,6 +98,7 @@ export default function AccountPanel({ onBusyChange }) {
       <button
         type="button"
         className="secondary-button full-width"
+        disabled={busy}
         onClick={signOut}
       >
         <LogOut size={17} />
@@ -105,6 +114,7 @@ export default function AccountPanel({ onBusyChange }) {
           <button
             type="button"
             className="danger-button full-width"
+            disabled={busy}
             onClick={() => setConfirming(true)}
           >
             <Trash2 size={17} />
