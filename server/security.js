@@ -131,8 +131,10 @@ export const safeUser = (user) => ({
 export async function currentUser(request, env) {
   const token = readCookie(request, env);
   if (!token) return null;
+  // Verification gates session creation. An email edit must not end an already
+  // authenticated session; blocking and password changes revoke it explicitly.
   return env.DB.prepare(
-    "SELECT users.* FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.token_hash = ? AND sessions.expires_at > ? AND users.blocked = 0 AND users.email_verified = 1",
+    "SELECT users.* FROM sessions JOIN users ON users.id = sessions.user_id WHERE sessions.token_hash = ? AND sessions.expires_at > ? AND users.blocked = 0",
   )
     .bind(await hash(token), Date.now())
     .first();

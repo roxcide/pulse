@@ -1025,9 +1025,7 @@ it("admin searches, validates and saves edits, then requires exact email confirm
   await user.click(
     screen.getByRole("button", { name: "Сохранить пользователя" }),
   );
-  await screen.findByText(
-    "Пользователь обновлён. Его предыдущие сессии завершены.",
-  );
+  await screen.findByText("Пользователь обновлён. Вход в аккаунт сохранён.");
   expect(personState.profile).toEqual({ name: "Мария", goal: 4, rest: 90 });
   const request = requests.find(
     (r) => r.path === "/api/admin/users/person" && r.method === "PUT",

@@ -1,6 +1,6 @@
 # PULSE — Brevo, Google и гостевой вход
 
-Загрузи содержимое release/pulse-migration-fix.zip в корень GitHub-репозитория. Deploy command: **pnpm run deploy**. Сборка и миграции выполняются автоматически. Существующую D1 pulse-db не удаляй.
+Загрузи содержимое release/pulse-session-fix.zip в корень GitHub-репозитория. Deploy command: **pnpm run deploy**. Сборка и миграции выполняются автоматически. Существующую D1 pulse-db не удаляй.
 
 ## Если вход сообщает database_not_initialized
 

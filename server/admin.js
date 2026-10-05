@@ -118,6 +118,7 @@ export async function adminRoute(request, env) {
   ).bind(data.revision, sessionHash, Date.now(), actor.id, ADMIN_EMAIL, id);
   const statements = [guard];
   let action;
+  let sessionsRevoked = false;
   if (method === "DELETE") {
     if (
       data.confirmation !== "DELETE" ||
@@ -157,7 +158,9 @@ export async function adminRoute(request, env) {
     )
       fail(400, "invalid_request");
     let nextHash = target.password_hash;
-    if (account.password !== undefined && account.password !== "") {
+    const passwordChanged =
+      account.password !== undefined && account.password !== "";
+    if (passwordChanged) {
       checkPassword(account.password);
       nextHash = await passwordHash(account.password);
     }
@@ -206,10 +209,20 @@ export async function adminRoute(request, env) {
           JSON.stringify(value),
         ),
       );
-    statements.push(
-      env.DB.prepare("DELETE FROM sessions WHERE user_id=?").bind(id),
-      env.DB.prepare("DELETE FROM email_tokens WHERE user_id=?").bind(id),
-    );
+    sessionsRevoked = account.blocked || passwordChanged;
+    if (sessionsRevoked)
+      statements.push(
+        env.DB.prepare("DELETE FROM sessions WHERE user_id=?").bind(id),
+      );
+    // Keep pending verification/reset links for unrelated profile or workout edits.
+    if (
+      sessionsRevoked ||
+      emailChanged ||
+      account.emailVerified !== !!target.email_verified
+    )
+      statements.push(
+        env.DB.prepare("DELETE FROM email_tokens WHERE user_id=?").bind(id),
+      );
     action = "update_account";
   }
   statements.push(
@@ -235,5 +248,5 @@ export async function adminRoute(request, env) {
   }
   return method === "DELETE"
     ? Response.json({ ok: true })
-    : Response.json(await details(env, id));
+    : Response.json({ ...(await details(env, id)), sessionsRevoked });
 }

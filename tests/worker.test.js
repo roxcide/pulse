@@ -919,6 +919,113 @@ function adminUpdate(snapshot, account = {}, state = {}) {
 }
 
 describe("admin access and account management", () => {
+  it("keeps all sessions through profile, fitness, email and verification edits", async () => {
+    const owner = seedAdminUser("owner", "uvukostya@gmail.com");
+    const target = seedAdminUser("person", "person@example.com");
+    const { newSession, passwordHash } = await import("../server/security.js");
+    env.DB.raw
+      .prepare("UPDATE users SET password_hash=? WHERE id='person'")
+      .run(await passwordHash(password));
+    const second = (await newSession(env, { id: "person" })).split(";")[0];
+    env.DB.raw.exec(
+      "INSERT INTO email_tokens VALUES('pending-reset','person','reset',9999999999999)",
+    );
+    const initialSessions = env.DB.raw
+      .prepare(
+        "SELECT * FROM sessions WHERE user_id='person' ORDER BY token_hash",
+      )
+      .all();
+    for (const account of [
+      { displayName: "Новое имя", password: "" },
+      { emailVerified: false },
+      { emailVerified: true },
+      { email: "changed@example.com" },
+      {},
+    ]) {
+      const snapshot = await (
+        await call("/api/admin/users/person", undefined, { cookie: owner })
+      ).json();
+      const data = adminUpdate(snapshot, account, {
+        profile: {
+          name: account.displayName || snapshot.user.displayName,
+          goal: 5,
+          rest: 120,
+        },
+        split: ["Ноги", ...Array(6).fill("Не запланировано")],
+      });
+      const response = await call("/api/admin/users/person", data, {
+        method: "PUT",
+        cookie: owner,
+      });
+      expect(response.status).toBe(200);
+      expect((await response.json()).sessionsRevoked).toBe(false);
+      expect(
+        env.DB.raw
+          .prepare(
+            "SELECT * FROM sessions WHERE user_id='person' ORDER BY token_hash",
+          )
+          .all(),
+      ).toEqual(initialSessions);
+      for (const cookie of [target, second]) {
+        expect(
+          (
+            await (
+              await call("/api/auth/session", undefined, { cookie })
+            ).json()
+          ).user.id,
+        ).toBe("person");
+        const loaded = await call("/api/state", undefined, { cookie });
+        expect(loaded.status).toBe(200);
+        expect((await loaded.json()).state.profile).toEqual(data.state.profile);
+        expect(
+          (
+            await call(
+              "/api/state",
+              { profile: data.state.profile },
+              { method: "PUT", cookie },
+            )
+          ).status,
+        ).toBe(200);
+      }
+      if (account.displayName)
+        expect(
+          env.DB.raw
+            .prepare(
+              "SELECT COUNT(*) AS n FROM email_tokens WHERE user_id='person'",
+            )
+            .get().n,
+        ).toBe(1);
+    }
+    // A retained session does not bypass verification on a new sign-in.
+    await expect(newSession(env, { id: "person" })).rejects.toThrow();
+    const login = await call("/api/auth/login", {
+      email: "changed@example.com",
+      password,
+    });
+    expect((await login.json()).verificationRequired).toBe(true);
+  });
+  it("revokes every session on blocking alone and does not restore them when unblocked", async () => {
+    const owner = seedAdminUser("owner", "uvukostya@gmail.com");
+    const target = seedAdminUser("person", "person@example.com");
+    const { newSession } = await import("../server/security.js");
+    const second = (await newSession(env, { id: "person" })).split(";")[0];
+    for (const blocked of [true, false]) {
+      const snapshot = await (
+        await call("/api/admin/users/person", undefined, { cookie: owner })
+      ).json();
+      const response = await call(
+        "/api/admin/users/person",
+        adminUpdate(snapshot, { blocked }),
+        { method: "PUT", cookie: owner },
+      );
+      expect(response.status).toBe(200);
+      expect((await response.json()).sessionsRevoked).toBe(blocked);
+      for (const cookie of [target, second])
+        expect((await call("/api/state", undefined, { cookie })).status).toBe(
+          401,
+        );
+    }
+  });
   it("requires the verified owner and a matching session account on every endpoint", async () => {
     const normal = seedAdminUser("normal", "normal@example.com");
     const unverifiedOwner = seedAdminUser("owner", "uvukostya@gmail.com", 0);
@@ -935,7 +1042,7 @@ describe("admin access and account management", () => {
       );
       expect(
         (await call(path, data, { method, cookie: unverifiedOwner })).status,
-      ).toBe(401);
+      ).toBe(403);
     }
     await call(
       "/api/state",
@@ -1034,6 +1141,7 @@ describe("admin access and account management", () => {
     expect(result.user.revision).toBeGreaterThan(snapshot.user.revision);
     expect(JSON.stringify(result)).not.toContain("new pass 123");
     expect(result.user.hasPassword).toBe(true);
+    expect(result.sessionsRevoked).toBe(true);
     expect(
       (await call("/api/state", undefined, { cookie: target })).status,
     ).toBe(401);
