@@ -1,6 +1,24 @@
 # PULSE — Brevo, Google и гостевой вход
 
-Загрузи содержимое release/pulse-admin.zip в корень GitHub-репозитория. Deploy command: **pnpm run deploy**. Сборка и миграции выполняются автоматически. Существующую D1 pulse-db не удаляй.
+Загрузи содержимое release/pulse-migration-fix.zip в корень GitHub-репозитория. Deploy command: **pnpm run deploy**. Сборка и миграции выполняются автоматически. Существующую D1 pulse-db не удаляй.
+
+## Если вход сообщает database_not_initialized
+
+Это означает, что подключённая база не содержит всех необходимых таблиц или колонок. Для версии с админ-панелью нужны обе миграции: `0001_auth.sql` и `0002_admin.sql`.
+
+1. Загрузи обновлённые файлы в GitHub, включая `scripts/deploy.mjs`, `scripts/deployment-plan.mjs` и папку `migrations`.
+2. В Cloudflare → Workers & Pages → pulse → Settings → Builds установи Deploy command: `pnpm run deploy`. Прямой `npx wrangler deploy` пропускает миграции.
+3. Запусти новую сборку актуального коммита. Теперь миграции и проверка схемы выполняются до публикации Worker. При их ошибке публикация остановится; смотри первую ошибку D1 в логе. Для токена сборки нужны права Account → D1 → Edit.
+4. После успешного деплоя открой `https://pulser.pp.ua/api/auth/config`: ожидается `checks.database: "ready"`. Затем обнови страницу входа.
+
+Если актуальный код уже опубликован, исправить базу отдельно можно из папки проекта после установки зависимостей:
+
+```sh
+pnpm exec wrangler login
+pnpm run db:remote
+```
+
+Миграции сохраняют существующие аккаунты и тренировки. Не создавай новую базу вместо действующей и не повторяй вручную отдельные `ALTER TABLE`. Если команда не прошла, нужен текст первой ошибки миграции из лога, без секретов; один requestId не показывает, какой шаг не выполнен.
 
 ## Runtime variables and secrets
 
@@ -39,7 +57,7 @@ Authorized redirect URIs: https://pulser.pp.ua/api/auth/callback/google
 
 ## Диагностика
 
-- checks.database: missing_schema — выполни pnpm run db:remote или SQL из migrations/0001_auth.sql в D1 Console. Данные не удаляются.
+- checks.database: missing_schema — выполни `pnpm run db:remote`, чтобы применить все оставшиеся миграции. Одного `0001_auth.sql` для админ-панели недостаточно. Данные не удаляются.
 - checks.email: not_configured — проверь BREVO_API_KEY и EMAIL_FROM.
 - email_configuration_error — Brevo отклонил настройки; проверь ключ, активность отправителя, доступ к транзакционным письмам и ограничения IP в Brevo.
 - email_unavailable — временный сбой сети, лимит отправки или ошибка сервиса.
@@ -73,6 +91,6 @@ Authorized redirect URIs: https://pulser.pp.ua/api/auth/callback/google
 
 ## Обновление с админ-панелью
 
-Нужна миграция `0002_admin.sql`; команда `pnpm run deploy` применит её автоматически. Дождись успешного окончания миграций. Если публикация прошла, а миграция нет, выполни `pnpm run db:remote`. Не удаляй существующую базу.
+Нужна миграция `0002_admin.sql`; команда `pnpm run deploy` применит её автоматически перед публикацией Worker и проверит схему. Если уже опубликованная версия выдаёт ошибку базы, выполни `pnpm run db:remote`. Не удаляй существующую базу.
 
 После деплоя обнови страницу и войди в подтверждённый аккаунт `uvukostya@gmail.com`. Значок щита сверху открывает панель; прямой адрес — `https://pulser.pp.ua/#admin`. Другим аккаунтам API возвращает отказ. Пароль администратора не зашит в проект, дополнительные секреты для этой панели не нужны.
