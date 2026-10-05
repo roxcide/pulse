@@ -8,7 +8,7 @@ import React, {
 import { LoaderCircle } from "lucide-react";
 import { api, authError } from "../auth/client";
 import { useAuth } from "../auth/AuthProvider";
-import { newAccountState } from "./defaults";
+import { newAccountState, restoreAccountState } from "./defaults";
 import { validState } from "../../shared/state";
 const DataContext = createContext(null);
 export const useUserData = () => useContext(DataContext);
@@ -21,7 +21,7 @@ function loadGuest(user) {
     if (!raw) return { data: defaults, error: "" };
     const saved = JSON.parse(raw);
     if (!validState(saved)) throw new Error("invalid_guest_data");
-    return { data: { ...defaults, ...saved }, error: "" };
+    return { data: restoreAccountState(user, saved), error: "" };
   } catch {
     return {
       data: defaults,
@@ -108,7 +108,7 @@ export function UserDataProvider({ user, children }) {
     api("/api/state", undefined, "GET", user.id)
       .then((result) => {
         if (cancelled) return;
-        current.current = { ...newAccountState(user), ...result.state };
+        current.current = restoreAccountState(user, result.state);
         setData(current.current);
         setLoadError("");
       })

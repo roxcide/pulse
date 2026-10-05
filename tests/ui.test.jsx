@@ -694,3 +694,206 @@ it("waits for an in-flight save before deletion even when that save fails", asyn
   expect(requests.filter((r) => r.method === "PUT")).toHaveLength(1);
   expect(requests.filter((r) => r.method === "DELETE")).toHaveLength(1);
 });
+
+it("provides a guide for every built-in and merges old catalogs without losing user data", async () => {
+  const { initialExercises } = await import("../src/data");
+  const { exerciseGuides } = await import("../src/exercises/catalog");
+  const { restoreAccountState } = await import("../src/state/defaults");
+  const { validState } = await import("../shared/state");
+  expect(initialExercises).toHaveLength(35);
+  expect(new Set(initialExercises.map((e) => e.id)).size).toBe(35);
+  for (const exercise of initialExercises) {
+    expect(exerciseGuides[exercise.id].steps).toHaveLength(4);
+    expect(exerciseGuides[exercise.id].mistakes.length).toBeGreaterThan(0);
+  }
+  const original = newAccountState({ displayName: "Анна" });
+  original.exercises = [
+    { ...original.exercises[0], weight: 55, reps: 7 },
+    {
+      id: "custom",
+      name: "Моё упражнение",
+      muscle: "Спина",
+      equipment: "Гантели",
+      weight: 8,
+      reps: 12,
+      description: "Своя техника",
+    },
+  ];
+  const snapshot = structuredClone(original);
+  const restored = restoreAccountState({ displayName: "Анна" }, original);
+  expect(restored.exercises).toHaveLength(36);
+  expect(restored.exercises.slice(0, 2)).toEqual(original.exercises);
+  expect(restored.history).toEqual([]);
+  expect(original).toEqual(snapshot);
+  expect(restoreAccountState({ displayName: "Анна" }, restored)).toEqual(
+    restored,
+  );
+  expect(validState(restored)).toBe(true);
+  expect(
+    validState({
+      exercises: [{ ...original.exercises[1], description: "a".repeat(2001) }],
+    }),
+  ).toBe(false);
+});
+
+it("opens techniques from filtered library and workout without starting or changing sets", async () => {
+  session = { id: "one", displayName: "Анна" };
+  saved = {
+    exercises: [
+      {
+        id: "bench",
+        name: "Жим штанги лёжа",
+        muscle: "Грудь",
+        equipment: "Штанга",
+        weight: 55,
+        reps: 7,
+      },
+    ],
+  };
+  window.history.replaceState({}, "", "/#exercises");
+  const user = userEvent.setup();
+  const { container } = app();
+  await screen.findByText("Найдено упражнений: 35");
+  await user.selectOptions(screen.getByLabelText("Оборудование"), "Свой вес");
+  await user.type(screen.getByLabelText("Поиск упражнений"), "подтягивания");
+  expect(container.querySelectorAll(".exercise-card")).toHaveLength(2);
+  await user.click(
+    screen.getByRole("button", { name: "Техника: Подтягивания прямым хватом" }),
+  );
+  expect(
+    screen.getByRole("dialog", { name: "Подтягивания прямым хватом" })
+      .textContent,
+  ).toContain("Частые ошибки");
+  expect(saved.active).toBeUndefined();
+  await user.keyboard("{Escape}");
+  expect(screen.queryByRole("dialog")).toBeNull();
+  expect(document.activeElement).toBe(
+    screen.getByRole("button", { name: "Техника: Подтягивания прямым хватом" }),
+  );
+  await user.click(
+    screen.getByRole("button", {
+      name: "Добавить Подтягивания прямым хватом в тренировку",
+    }),
+  );
+  await user.click(
+    screen.getByRole("button", { name: "Техника: Подтягивания прямым хватом" }),
+  );
+  expect(container.querySelectorAll(".set-row")).toHaveLength(3);
+  await user.click(
+    screen.getByRole("button", { name: "Закрыть", exact: true }),
+  );
+  await waitFor(() => expect(saved.active?.exercises[0].id).toBe("pullups"));
+  expect(saved.active.exercises[0].sets.every((s) => !s.done)).toBe(true);
+});
+
+it("saves and edits custom technique descriptions in guest storage", async () => {
+  localStorage.setItem("pulse-guest-mode-v1", "true");
+  window.history.replaceState({}, "", "/#exercises");
+  const user = userEvent.setup();
+  app();
+  await user.click(
+    await screen.findByRole("button", { name: "Своё упражнение" }),
+  );
+  await user.type(screen.getByLabelText("Название"), "Упражнение тренера");
+  await user.type(
+    screen.getByLabelText("Описание техники"),
+    "Контролируй движение.",
+  );
+  await user.click(
+    screen.getByRole("button", { name: "Добавить упражнение", exact: true }),
+  );
+  await user.click(
+    screen.getByRole("button", { name: "Техника: Упражнение тренера" }),
+  );
+  expect(screen.getByLabelText("Описание техники").value).toBe(
+    "Контролируй движение.",
+  );
+  await user.clear(screen.getByLabelText("Описание техники"));
+  await user.type(
+    screen.getByLabelText("Описание техники"),
+    "Новая заметка тренера.",
+  );
+  await user.click(screen.getByRole("button", { name: "Сохранить описание" }));
+  const state = JSON.parse(localStorage.getItem("pulse-guest-data-v1"));
+  expect(
+    state.exercises.find((e) => e.name === "Упражнение тренера").description,
+  ).toBe("Новая заметка тренера.");
+  expect(state.history).toEqual([]);
+});
+
+it("deletes any set, recalculates progress, persists deletions and can add after the last set", async () => {
+  localStorage.setItem("pulse-guest-mode-v1", "true");
+  window.history.replaceState({}, "", "/#exercises");
+  const user = userEvent.setup();
+  const { container, unmount } = app();
+  await user.click(
+    await screen.findByRole("button", {
+      name: "Добавить Жим штанги лёжа в тренировку",
+    }),
+  );
+  fireEvent.change(screen.getByLabelText("Вес, Жим штанги лёжа, подход 1"), {
+    target: { value: "30" },
+  });
+  fireEvent.change(screen.getByLabelText("Вес, Жим штанги лёжа, подход 3"), {
+    target: { value: "50" },
+  });
+  await user.click(
+    screen.getByRole("button", { name: "Завершить подход 1, Жим штанги лёжа" }),
+  );
+  await user.click(
+    screen.getByRole("button", { name: "Удалить подход 2, Жим штанги лёжа" }),
+  );
+  expect(container.querySelector(".workout-progress").textContent).toContain(
+    "1 / 2",
+  );
+  expect(screen.getByLabelText("Вес, Жим штанги лёжа, подход 2").value).toBe(
+    "50",
+  );
+  await user.click(
+    screen.getByRole("button", { name: "Удалить подход 1, Жим штанги лёжа" }),
+  );
+  expect(container.querySelector(".workout-progress").textContent).toContain(
+    "0 / 1",
+  );
+  expect(
+    screen.getByRole("button", { name: "Завершить", exact: true }).disabled,
+  ).toBe(true);
+  unmount();
+  const next = app();
+  await screen.findByLabelText("Вес, Жим штанги лёжа, подход 1");
+  expect(next.container.querySelectorAll(".set-row")).toHaveLength(1);
+  expect(screen.getByLabelText("Вес, Жим штанги лёжа, подход 1").value).toBe(
+    "50",
+  );
+  await user.click(
+    screen.getByRole("button", { name: "Удалить подход 1, Жим штанги лёжа" }),
+  );
+  expect(
+    next.container.querySelector(".progress-track > div").style.width,
+  ).toBe("0%");
+  expect(screen.getByText(/Подходов пока нет/)).toBeTruthy();
+  await user.click(screen.getByRole("button", { name: "Добавить подход" }));
+  expect(next.container.querySelectorAll(".set-row")).toHaveLength(1);
+  fireEvent.change(screen.getByLabelText("Вес, Жим штанги лёжа, подход 1"), {
+    target: { value: "20" },
+  });
+  await user.click(
+    screen.getByRole("button", { name: "Завершить подход 1, Жим штанги лёжа" }),
+  );
+  await user.click(
+    screen.getByRole("button", { name: "Завершить", exact: true }),
+  );
+  // The summary must exclude the deleted completed 30 kg set.
+  const stored = JSON.parse(localStorage.getItem("pulse-guest-data-v1"));
+  expect(stored.active.exercises[0].sets).toEqual([
+    { weight: 20, reps: 10, done: true },
+  ]);
+  expect(stored.history).toEqual([]);
+  await user.click(
+    screen.getByRole("button", { name: "Сохранить", exact: true }),
+  );
+  const finished = JSON.parse(localStorage.getItem("pulse-guest-data-v1"));
+  expect(finished.active).toBeNull();
+  expect(finished.history[0].sets).toBe(1);
+  expect(finished.history[0].volume).toBe(200);
+});

@@ -1,3 +1,5 @@
+import { additionalExercises } from "./exercises/catalog";
+
 export const muscles = [
   "Все группы",
   "Грудь",
@@ -129,6 +131,8 @@ export const initialExercises = [
     reps: 20,
   },
 ];
+initialExercises.push(...additionalExercises);
+
 export const programs = [
   {
     id: "full",

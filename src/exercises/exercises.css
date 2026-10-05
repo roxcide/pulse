@@ -1,0 +1,193 @@
+.exercise-card .exercise-details-trigger {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  gap: 15px;
+  min-width: 0;
+  padding: 6px 0;
+  background: transparent;
+  text-align: left;
+  border-radius: 8px;
+}
+.exercise-card-copy {
+  min-width: 0;
+}
+.exercise-card-name {
+  display: block;
+  font-size: 14px;
+  font-weight: 700;
+  line-height: 1.5;
+  margin-top: 5px;
+  overflow-wrap: anywhere;
+}
+.exercise-card-meta {
+  display: block;
+  font-size: 11px;
+  color: var(--theme-muted, #94a180);
+  line-height: 1.7;
+  margin-top: 6px;
+}
+.exercise-technique-link {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-top: 10px;
+  font-size: 11px;
+  color: var(--theme-accent, #c5f578);
+}
+.exercise-card:has(.exercise-details-trigger:hover) {
+  border-color: var(--theme-accent, #c5f578);
+}
+.exercise-name-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 44px;
+  padding: 0;
+  background: transparent;
+  text-align: left;
+  font-weight: inherit;
+}
+.exercise-name-button svg {
+  color: var(--theme-accent, #c5f578);
+}
+.exercise-guide {
+  font-size: 14px;
+  line-height: 1.75;
+}
+.exercise-guide-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.exercise-guide-tags span {
+  background: var(--theme-raised, #252f1e);
+  color: var(--theme-secondary, #c4d8b0);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+.exercise-guide-summary {
+  color: var(--theme-secondary, #c4d8b0);
+  margin-bottom: 24px;
+}
+.exercise-guide h3 {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 14px;
+  margin-bottom: 16px;
+}
+.exercise-guide h3 svg {
+  color: var(--theme-accent, #c5f578);
+}
+.technique-steps {
+  list-style: none;
+  counter-reset: step;
+  padding: 0;
+  margin: 0 0 24px;
+}
+.technique-steps li {
+  counter-increment: step;
+  position: relative;
+  padding-left: 42px;
+  margin-bottom: 18px;
+}
+.technique-steps li::before {
+  content: counter(step, decimal-leading-zero);
+  position: absolute;
+  left: 0;
+  top: 1px;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  background: var(--theme-raised, #252f1e);
+  color: var(--theme-accent, #c5f578);
+  border-radius: 8px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.technique-mistakes {
+  border-top: 1px solid var(--theme-border, #333e2a);
+  padding-top: 20px;
+}
+.technique-mistakes ul {
+  padding-left: 20px;
+  margin: 0;
+  color: var(--theme-secondary, #c4d8b0);
+}
+.technique-mistakes li + li {
+  margin-top: 8px;
+}
+.technique-tip {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 15px;
+  background: var(--theme-raised, #252f1e);
+  border-radius: 10px;
+  margin-top: 22px;
+  color: var(--theme-secondary, #c4d8b0);
+}
+.technique-tip svg {
+  margin-top: 3px;
+  color: var(--theme-accent, #c5f578);
+}
+.form-field textarea {
+  width: 100%;
+  min-height: 100px;
+  resize: vertical;
+  border: 1px solid var(--theme-strong-border, #455938);
+  border-radius: 7px;
+  padding: 12px;
+  background: var(--theme-raised, #252f1e);
+  color: var(--theme-text, #efefed);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.form-field textarea:focus-visible {
+  outline: 2px solid var(--theme-accent, #c5f578);
+  outline-offset: 3px;
+}
+.active-exercise .set-header,
+.active-exercise .set-row {
+  grid-template-columns: 45px minmax(0, 1fr) minmax(0, 1fr) 44px 44px;
+  gap: 10px;
+}
+.active-exercise .remove-set {
+  width: 44px;
+  height: 44px;
+  border-radius: 7px;
+  color: var(--theme-muted, #94a180);
+  justify-self: center;
+}
+.active-exercise .remove-set:hover {
+  background: var(--theme-raised, #252f1e);
+  color: var(--theme-text, #efefed);
+}
+.no-sets {
+  color: var(--theme-muted, #94a180);
+  font-size: 13px;
+  line-height: 1.7;
+  padding: 15px 0;
+}
+@media (max-width: 600px) {
+  .active-exercise .set-header,
+  .active-exercise .set-row {
+    grid-template-columns: 26px minmax(0, 1fr) minmax(0, 1fr) 44px 44px;
+    gap: 6px;
+  }
+  .exercise-card .exercise-details-trigger {
+    gap: 12px;
+  }
+  .exercise-guide {
+    font-size: 14px;
+  }
+  .exercise-card .exercise-symbol {
+    width: 40px;
+    height: 44px;
+  }
+}

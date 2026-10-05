@@ -9,7 +9,8 @@ const exercise = (e) =>
   text(e.muscle) &&
   text(e.equipment) &&
   number(e.weight, 2000) &&
-  number(e.reps, 10000);
+  number(e.reps, 10000) &&
+  (e.description === undefined || text(e.description, 2000));
 const workoutExercise = (e) =>
   e &&
   text(e.id) &&

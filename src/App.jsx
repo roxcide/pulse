@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from "react";
 import {
+  BookOpen,
   Activity,
   LayoutDashboard,
   Dumbbell,
@@ -32,6 +33,7 @@ import {
 } from "lucide-react";
 import { useAuth } from "./auth/AuthProvider";
 import AccountPanel from "./account/AccountPanel";
+import ExerciseDetails from "./exercises/ExerciseDetails";
 import { ThemePicker } from "./theme";
 import { useUserData } from "./state/UserDataProvider";
 import { useStoredState } from "./hooks";
@@ -202,6 +204,19 @@ export default function App() {
               ),
             }
           : e,
+      ),
+    }));
+  }
+  function removeSet(ei, si) {
+    setActive((workout) => ({
+      ...workout,
+      exercises: workout.exercises.map((exercise, index) =>
+        index === ei
+          ? {
+              ...exercise,
+              sets: exercise.sets.filter((_, setIndex) => setIndex !== si),
+            }
+          : exercise,
       ),
     }));
   }
@@ -805,16 +820,27 @@ export default function App() {
               <div className="exercise-library">
                 {filtered.map((e) => (
                   <article className="exercise-card" key={e.id}>
-                    <div className="exercise-symbol">
-                      <MuscleIcon muscle={e.muscle} size={28} />
-                    </div>
-                    <div>
-                      <span className="eyebrow">{e.muscle}</span>
-                      <h3>{e.name}</h3>
-                      <p>
-                        {e.equipment} <span>·</span> 3 × {e.reps} повторений
-                      </p>
-                    </div>
+                    <button
+                      className="exercise-details-trigger"
+                      aria-label={`Техника: ${e.name}`}
+                      onClick={() =>
+                        setModal({ type: "exerciseDetails", exercise: e })
+                      }
+                    >
+                      <span className="exercise-symbol">
+                        <MuscleIcon muscle={e.muscle} size={28} />
+                      </span>
+                      <span className="exercise-card-copy">
+                        <span className="eyebrow">{e.muscle}</span>
+                        <span className="exercise-card-name">{e.name}</span>
+                        <span className="exercise-card-meta">
+                          {e.equipment} <span>·</span> 3 × {e.reps} повторений
+                        </span>
+                        <span className="exercise-technique-link">
+                          Техника выполнения <ChevronRight size={14} />
+                        </span>
+                      </span>
+                    </button>
                     <button
                       className="icon-button"
                       aria-label={`Добавить ${e.name} в тренировку`}
@@ -1148,7 +1174,24 @@ export default function App() {
                             {String(ei + 1).padStart(2, "0")}
                           </span>
                           <div>
-                            <h3>{e.name}</h3>
+                            <h3>
+                              <button
+                                className="exercise-name-button"
+                                aria-label={`Техника: ${e.name}`}
+                                onClick={() =>
+                                  setModal({
+                                    type: "exerciseDetails",
+                                    exercise:
+                                      exercises.find(
+                                        (item) => item.id === e.id,
+                                      ) || e,
+                                  })
+                                }
+                              >
+                                {e.name}
+                                <BookOpen size={16} />
+                              </button>
+                            </h3>
                             <span>
                               {e.muscle} <i>·</i> {e.equipment}
                             </span>
@@ -1172,6 +1215,7 @@ export default function App() {
                           <span>Вес, кг</span>
                           <span>Повторения</span>
                           <span>Готово</span>
+                          <span aria-hidden="true" />
                         </div>
                         {e.sets.map((s, si) => (
                           <div
@@ -1229,8 +1273,21 @@ export default function App() {
                             >
                               <Check size={20} />
                             </button>
+                            <button
+                              className="icon-button remove-set"
+                              aria-label={`Удалить подход ${si + 1}, ${e.name}`}
+                              onClick={() => removeSet(ei, si)}
+                            >
+                              <Trash2 size={17} />
+                            </button>
                           </div>
                         ))}
+                        {e.sets.length === 0 && (
+                          <p className="no-sets">
+                            Подходов пока нет. Добавь первый, когда будешь
+                            готов.
+                          </p>
+                        )}
                         <button
                           className="text-button add-set"
                           onClick={() =>
@@ -1243,8 +1300,14 @@ export default function App() {
                                       sets: [
                                         ...item.sets,
                                         {
-                                          weight: item.sets.at(-1)?.weight || 0,
-                                          reps: item.sets.at(-1)?.reps || 10,
+                                          weight:
+                                            item.sets.at(-1)?.weight ??
+                                            item.weight ??
+                                            0,
+                                          reps:
+                                            item.sets.at(-1)?.reps ??
+                                            item.reps ??
+                                            10,
                                           done: false,
                                         },
                                       ],
@@ -1446,6 +1509,7 @@ export default function App() {
               goal: "Твоя недельная цель",
               account: "Твой аккаунт",
               exercise: "Новое упражнение",
+              exerciseDetails: modal.exercise?.name,
               split: fullDayNames[modal.day],
               plan: "План на тренировку",
               program: modal.program?.name,
@@ -1460,6 +1524,22 @@ export default function App() {
           onClose={closeModal}
           busy={accountBusy}
         >
+          {modal.type === "exerciseDetails" && (
+            <ExerciseDetails
+              exercise={modal.exercise}
+              onSaveDescription={(description) => {
+                setExercises((list) =>
+                  list.map((exercise) =>
+                    exercise.id === modal.exercise.id
+                      ? { ...exercise, description }
+                      : exercise,
+                  ),
+                );
+                setModal(null);
+                notify("Описание сохранено");
+              }}
+            />
+          )}
           {modal.type === "account" && (
             <AccountPanel onBusyChange={setAccountBusy} />
           )}
@@ -1551,6 +1631,7 @@ export default function App() {
                     equipment: data.get("equipment"),
                     weight: Number(data.get("weight")),
                     reps: Number(data.get("reps")),
+                    description: data.get("description").trim(),
                   },
                 ]);
                 setModal(null);
@@ -1612,6 +1693,15 @@ export default function App() {
                   />
                 </label>
               </div>
+              <label className="form-field">
+                Описание техники
+                <textarea
+                  name="description"
+                  rows={4}
+                  maxLength={2000}
+                  placeholder="Исходное положение, движение, подсказки тренера…"
+                />
+              </label>
               <button className="primary-button full-width" type="submit">
                 <Plus size={17} />
                 Добавить упражнение
