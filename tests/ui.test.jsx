@@ -473,6 +473,8 @@ it("restores the code form and enters the account without another password", asy
         });
       if (path === "/api/auth/verify") {
         requests.push({ path, body: JSON.parse(options.body) });
+        if (JSON.parse(options.body).code !== "001234")
+          return Response.json({ error: "invalid_code" }, { status: 400 });
         verified = true;
         session = { id: "one", email: "one@example.com", displayName: "Анна" };
         return Response.json({ user: session });
@@ -480,19 +482,51 @@ it("restores the code form and enters the account without another password", asy
       return original(path, options);
     }),
   );
-  app();
+  const { container } = app();
   await screen.findByRole("heading", { name: "Введи код из письма." });
   expect(screen.queryByLabelText("Пароль", { exact: true })).toBeNull();
   const input = screen.getByLabelText("Код подтверждения");
   expect(input.autocomplete).toBe("one-time-code");
+  const cells = container.querySelectorAll(".verification-cell");
+  expect(cells).toHaveLength(6);
   fireEvent.change(input, { target: { value: "001234" } });
+  await userEvent.click(cells[2]);
+  await userEvent.keyboard("9");
+  expect(input.value).toBe("009234");
   await userEvent.click(
     screen.getByRole("button", { name: "Подтвердить и войти" }),
   );
-  await screen.findByRole("heading", { name: "В твоём ритме, Анна." });
-  expect(requests.find((r) => r.path === "/api/auth/verify").body.code).toBe(
-    "001234",
+  await screen.findByText("Проверь код и попробуй ещё раз.");
+  expect(container.querySelector(".verification-field.is-error")).toBeTruthy();
+  expect(input.getAttribute("aria-invalid")).toBe("true");
+  expect(
+    screen.queryByRole("heading", { name: "В твоём ритме, Анна." }),
+  ).toBeNull();
+  fireEvent.paste(input, { clipboardData: { getData: () => "001 234" } });
+  expect(input.value).toBe("001234");
+  expect(container.querySelector(".verification-field.is-error")).toBeNull();
+  await userEvent.click(
+    screen.getByRole("button", { name: "Подтвердить и войти" }),
   );
+  await screen.findByText("Код верный. Открываем твой аккаунт…");
+  expect(
+    container.querySelectorAll(
+      ".verification-field.is-success .verification-cell",
+    ),
+  ).toHaveLength(6);
+  expect(
+    screen
+      .getByRole("button", { name: "Почта подтверждена" })
+      .matches(":disabled"),
+  ).toBe(true);
+  await screen.findByRole(
+    "heading",
+    { name: "В твоём ритме, Анна." },
+    { timeout: 2000 },
+  );
+  expect(
+    requests.filter((r) => r.path === "/api/auth/verify").at(-1).body.code,
+  ).toBe("001234");
   expect(requests.some((r) => r.path === "/api/auth/login")).toBe(false);
 });
 

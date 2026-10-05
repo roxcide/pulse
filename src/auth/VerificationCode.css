@@ -1,0 +1,140 @@
+.verification-field {
+  margin-bottom: 22px;
+}
+.verification-label {
+  display: block;
+  margin-bottom: 12px;
+  font-size: 13px;
+  color: var(--theme-secondary, #bac7ac);
+}
+.verification-cells {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: clamp(6px, 1.7vw, 10px);
+}
+.auth-form input.verification-native {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  border: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+.verification-cell {
+  min-width: 0;
+  height: clamp(54px, 14vw, 68px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--theme-border, #343e2c);
+  border-radius: 12px;
+  background: var(--theme-raised, #191f15);
+  color: var(--theme-text, #f0f4e8);
+  font-size: clamp(24px, 6vw, 30px);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  cursor: text;
+  transition:
+    border-color 160ms,
+    background-color 160ms,
+    box-shadow 160ms,
+    color 160ms;
+}
+.verification-placeholder {
+  opacity: 0.3;
+  font-weight: 400;
+}
+.verification-cell.is-active {
+  border-color: var(--theme-accent, #cbf578);
+  box-shadow: 0 0 0 3px
+    color-mix(in srgb, var(--theme-accent, #cbf578) 13%, transparent);
+}
+.verification-field.is-checking .verification-cell {
+  opacity: 0.75;
+}
+.verification-field.is-success .verification-cell {
+  color: #a9f5c2;
+  background: #143325;
+  border-color: #55d88a;
+  box-shadow: 0 0 14px #38d97624;
+  animation: verification-glow 450ms ease-out both;
+  animation-delay: calc(var(--digit-index) * 45ms);
+}
+.verification-field.is-error .verification-cell {
+  color: #ffc3c3;
+  background: #361e23;
+  border-color: #ef7777;
+  box-shadow: 0 0 12px #ed59591a;
+  animation: verification-flash 400ms ease-out;
+}
+.verification-field.is-error .verification-cells {
+  animation: verification-shake 350ms ease-in-out;
+}
+.verification-hint {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-height: 24px;
+  margin-top: 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--theme-secondary, #9fae90);
+}
+.verification-hint svg {
+  flex-shrink: 0;
+}
+.is-success .verification-hint {
+  color: var(--theme-text, #f0f4e8);
+}
+.is-success .verification-hint svg {
+  color: #55b879;
+}
+.is-error .verification-hint svg {
+  color: #e56565;
+}
+@keyframes verification-glow {
+  0% {
+    transform: translateY(0);
+    box-shadow: 0 0 0 #38d97600;
+  }
+  40% {
+    transform: translateY(-4px);
+    box-shadow: 0 0 22px #38d97650;
+  }
+  100% {
+    transform: translateY(0);
+  }
+}
+@keyframes verification-flash {
+  0% {
+    background: #6b2934;
+  }
+  100% {
+    background: #361e23;
+  }
+}
+@keyframes verification-shake {
+  0%,
+  100% {
+    transform: translateX(0);
+  }
+  25%,
+  65% {
+    transform: translateX(-4px);
+  }
+  45%,
+  85% {
+    transform: translateX(4px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .verification-cell {
+    transition: none;
+  }
+  .verification-field.is-error .verification-cells,
+  .verification-field:is(.is-error, .is-success) .verification-cell {
+    animation: none;
+  }
+}

@@ -11,6 +11,7 @@ import {
 import { api, authError } from "./client";
 import { useAuth } from "./AuthProvider";
 import { ThemePicker } from "../theme";
+import VerificationCode from "./VerificationCode";
 
 function ProviderIcon() {
   return (
@@ -56,6 +57,16 @@ export default function AuthScreen({ initialError = "" }) {
   const [error, setError] = useState(initialError),
     [email, setEmail] = useState(pendingVerification?.email || "");
   const [code, setCode] = useState("");
+  const [codeStatus, setCodeStatus] = useState("idle");
+  const [verifiedAccount, setVerifiedAccount] = useState(null);
+  useEffect(() => {
+    if (!verifiedAccount) return;
+    const timer = setTimeout(() => {
+      completeSignIn(verifiedAccount);
+      window.history.replaceState({}, "", location.pathname + "#dashboard");
+    }, 800);
+    return () => clearTimeout(timer);
+  }, [verifiedAccount, completeSignIn]);
   const [notice, setNotice] = useState("");
   const [cooldown, setCooldown] = useState(0);
   useEffect(() => {
@@ -79,11 +90,14 @@ export default function AuthScreen({ initialError = "" }) {
     setError("");
     setVisible(false);
     setCode("");
+    setCodeStatus("idle");
     window.history.replaceState({}, "", location.pathname);
   };
   async function submit(event) {
     event.preventDefault();
+    if (busy) return;
     setError("");
+    let enteringAccount = false;
     const form = new FormData(event.currentTarget);
     const password = String(form.get("password") || "");
     if (
@@ -94,6 +108,10 @@ export default function AuthScreen({ initialError = "" }) {
       return;
     }
     setBusy(true);
+    if (mode === "confirm") {
+      setCodeStatus("checking");
+      setNotice("");
+    }
     try {
       const routes = {
         login: "login",
@@ -113,6 +131,7 @@ export default function AuthScreen({ initialError = "" }) {
         setMode("confirm");
         setEmail(result.email || email);
         setCode("");
+        setCodeStatus("idle");
         setNotice(
           result.emailSent
             ? "Код отправлен. Проверь входящие и спам."
@@ -123,7 +142,11 @@ export default function AuthScreen({ initialError = "" }) {
         setCooldown(
           result.emailSent || result.emailError === "rate_limit" ? 60 : 0,
         );
-      } else if (mode === "login" || mode === "confirm") {
+      } else if (mode === "confirm") {
+        enteringAccount = true;
+        setCodeStatus("success");
+        setVerifiedAccount(result.user);
+      } else if (mode === "login") {
         completeSignIn(result.user);
         window.history.replaceState({}, "", location.pathname + "#dashboard");
       } else if (mode === "reset") {
@@ -137,14 +160,17 @@ export default function AuthScreen({ initialError = "" }) {
       }
     } catch (err) {
       setError(authError(err));
+      if (mode === "confirm")
+        setCodeStatus(err.message === "invalid_code" ? "error" : "idle");
     } finally {
-      setBusy(false);
+      if (!enteringAccount) setBusy(false);
     }
   }
   async function resendCode() {
     setBusy(true);
     setError("");
     setNotice("");
+    setCodeStatus("idle");
     try {
       await api("/api/auth/resend", {});
       setCode("");
@@ -306,33 +332,15 @@ export default function AuthScreen({ initialError = "" }) {
                 )}
 
                 {mode === "confirm" && (
-                  <label className="form-field">
-                    Код подтверждения
-                    <input
-                      className="verification-code"
-                      aria-label="Код подтверждения"
-                      name="code"
-                      type="text"
-                      inputMode="numeric"
-                      autoComplete="one-time-code"
-                      autoFocus
-                      pattern="[0-9]{6}"
-                      minLength={6}
-                      maxLength={6}
-                      placeholder="000000"
-                      value={code}
-                      onChange={(event) =>
-                        setCode(
-                          event.target.value.replace(/[^0-9]/g, "").slice(0, 6),
-                        )
-                      }
-                      required
-                      aria-describedby="code-help"
-                    />
-                    <small id="code-help">
-                      Введи все 6 цифр, включая ноль в начале.
-                    </small>
-                  </label>
+                  <VerificationCode
+                    value={code}
+                    status={codeStatus}
+                    onChange={(value) => {
+                      setCode(value);
+                      setCodeStatus("idle");
+                      setError("");
+                    }}
+                  />
                 )}
                 {!["reset", "confirm"].includes(mode) && (
                   <label className="form-field">
@@ -393,7 +401,9 @@ export default function AuthScreen({ initialError = "" }) {
                   }
                   type="submit"
                 >
-                  {busy ? (
+                  {codeStatus === "success" ? (
+                    <Check size={18} />
+                  ) : busy ? (
                     <LoaderCircle size={18} className="spinning" />
                   ) : null}
                   {
@@ -401,7 +411,10 @@ export default function AuthScreen({ initialError = "" }) {
                       login: "Войти",
                       register: "Создать аккаунт",
                       reset: "Отправить ссылку",
-                      confirm: "Подтвердить и войти",
+                      confirm:
+                        codeStatus === "success"
+                          ? "Почта подтверждена"
+                          : "Подтвердить и войти",
                       update: "Сохранить пароль",
                     }[mode]
                   }
