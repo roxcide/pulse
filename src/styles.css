@@ -4000,3 +4000,10 @@ h1 {
     animation: none;
   }
 }
+.auth-form input.verification-code {
+  text-align: center;
+  font-size: 30px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.35em;
+  padding-left: calc(16px + 0.35em);
+}

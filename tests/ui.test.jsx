@@ -206,7 +206,10 @@ it("registers pending and asks the user to verify their mailbox", async () => {
         const data = JSON.parse(options.body);
 
         requests.push({ path, body: data });
-        return Response.json({ verificationRequired: true }, { status: 201 });
+        return Response.json(
+          { verificationRequired: true, email: data.email, emailSent: true },
+          { status: 201 },
+        );
       }
       return original(path, options);
     }),
@@ -236,10 +239,10 @@ it("registers pending and asks the user to verify their mailbox", async () => {
   await userEvent.click(
     screen.getByRole("button", { name: "Создать аккаунт" }),
   );
-  await screen.findByRole("heading", { name: "Проверь почту." });
+  await screen.findByRole("heading", { name: "Введи код из письма." });
   expect(session).toBeNull();
   expect(
-    screen.getByRole("button", { name: /Отправить письмо ещё раз/ }).disabled,
+    screen.getByRole("button", { name: /Отправить код ещё раз/ }).disabled,
   ).toBe(true);
   expect(requests.filter((r) => r.path === "/api/auth/register")).toHaveLength(
     1,
@@ -421,24 +424,38 @@ it("opens recovery links over guest mode and preserves local workouts", async ()
     JSON.stringify({ history: [] }),
   );
 });
-it("waits for explicit confirmation before consuming a verification link", async () => {
-  window.history.replaceState({}, "", "/?auth=verify#token=verify-token");
+it("restores the code form and enters the account without another password", async () => {
+  const original = fetch;
+  let verified = false;
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (path, options) => {
+      if (path === "/api/auth/session" && !verified)
+        return Response.json({
+          user: null,
+          verification: { email: "one@example.com" },
+        });
+      if (path === "/api/auth/verify") {
+        requests.push({ path, body: JSON.parse(options.body) });
+        verified = true;
+        session = { id: "one", email: "one@example.com", displayName: "Анна" };
+        return Response.json({ user: session });
+      }
+      return original(path, options);
+    }),
+  );
   app();
-  await screen.findByRole("heading", { name: "Подтверди почту." });
-  await waitFor(() =>
-    expect(
-      screen.getByRole("button", { name: "Подтвердить почту" }).disabled,
-    ).toBe(false),
-  );
-  expect(requests.some((r) => r.path === "/api/auth/verify")).toBe(false);
-  fireEvent.change(screen.getByLabelText("Пароль", { exact: true }), {
-    target: { value: "the-original-password" },
-  });
+  await screen.findByRole("heading", { name: "Введи код из письма." });
+  expect(screen.queryByLabelText("Пароль", { exact: true })).toBeNull();
+  const input = screen.getByLabelText("Код подтверждения");
+  expect(input.autocomplete).toBe("one-time-code");
+  fireEvent.change(input, { target: { value: "001234" } });
   await userEvent.click(
-    screen.getByRole("button", { name: "Подтвердить почту" }),
+    screen.getByRole("button", { name: "Подтвердить и войти" }),
   );
-  await screen.findByRole("heading", { name: "Готово." });
-  expect(
-    requests.find((r) => r.path === "/api/auth/verify").body,
-  ).toMatchObject({ token: "verify-token", password: "the-original-password" });
+  await screen.findByRole("heading", { name: "В твоём ритме, Анна." });
+  expect(requests.find((r) => r.path === "/api/auth/verify").body.code).toBe(
+    "001234",
+  );
+  expect(requests.some((r) => r.path === "/api/auth/login")).toBe(false);
 });

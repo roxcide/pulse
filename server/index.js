@@ -18,8 +18,13 @@ import {
 import { oauthStart, oauthCallback } from "./oauth.js";
 import { authConfig, errorCode } from "./diagnostics.js";
 import { validateState } from "./state.js";
-import { requireMail, sendAuthMail } from "./mail.js";
+import { requireMail } from "./mail.js";
 import { emailAuth } from "./email-auth.js";
+import {
+  pendingVerification,
+  startVerification,
+  verificationRoute,
+} from "./verification.js";
 
 const json = (data, status = 200, headers = {}) =>
   Response.json(data, { status, headers });
@@ -50,7 +55,11 @@ async function route(request, env) {
   }
   if (path === "/api/auth/session" && method === "GET") {
     const user = await currentUser(request, env);
-    return json({ user: user ? safeUser(user) : null });
+    const pending = !user ? await pendingVerification(request, env) : null;
+    return json({
+      user: user ? safeUser(user) : null,
+      ...(pending ? { verification: { email: pending.user.email } } : {}),
+    });
   }
   if (path === "/api/auth/logout" && method === "POST") {
     await env.DB.prepare("DELETE FROM sessions WHERE token_hash = ?")
@@ -93,6 +102,8 @@ async function route(request, env) {
   if (method !== "POST") fail(404, "not_found");
   const data = await body(request);
   await limit(env, `auth:${ip}`, 30);
+  const verification = await verificationRoute(request, env, path, data);
+  if (verification) return verification;
   const emailResult = await emailAuth(path, data, env);
   if (emailResult) return json(emailResult);
   if (path === "/api/auth/register") {
@@ -124,8 +135,7 @@ async function route(request, env) {
       )
       .first();
     if (!user) fail(409, "account_exists");
-    await sendAuthMail(env, user, "verify");
-    return json({ ok: true, verificationRequired: true }, 201);
+    return startVerification(env, user, 201);
   }
   if (path === "/api/auth/login") {
     const email = emailValue(data.email);
@@ -137,7 +147,7 @@ async function route(request, env) {
       .first();
     if (!(await passwordMatches(data.password, user?.password_hash)))
       fail(401, "invalid_credentials");
-    if (!user.email_verified) fail(403, "email_not_confirmed");
+    if (!user.email_verified) return startVerification(env, user);
     return json({ user: safeUser(user) }, 200, {
       "Set-Cookie": await newSession(env, user),
     });

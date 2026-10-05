@@ -36,15 +36,26 @@ function ProviderIcon() {
 }
 
 export default function AuthScreen({ initialError = "" }) {
-  const { config, reloadSession, enterGuest, emailAction, finishEmailAction } =
-    useAuth();
+  const {
+    config,
+    completeSignIn,
+    enterGuest,
+    emailAction,
+    finishEmailAction,
+    pendingVerification,
+  } = useAuth();
   const [mode, setMode] = useState(
-    emailAction?.mode === "recovery" ? "update" : emailAction?.mode || "login",
+    emailAction?.mode === "recovery"
+      ? "update"
+      : pendingVerification
+        ? "confirm"
+        : "login",
   );
   const [busy, setBusy] = useState(false),
     [visible, setVisible] = useState(false);
   const [error, setError] = useState(initialError),
-    [email, setEmail] = useState("");
+    [email, setEmail] = useState(pendingVerification?.email || "");
+  const [code, setCode] = useState("");
   const [notice, setNotice] = useState("");
   const [cooldown, setCooldown] = useState(0);
   useEffect(() => {
@@ -56,6 +67,10 @@ export default function AuthScreen({ initialError = "" }) {
     const params = new URLSearchParams(location.search);
     const code = params.get("error");
     if (code) setError(authError(new Error(code)));
+    if (emailAction?.mode === "verify")
+      setNotice(
+        "Теперь почта подтверждается кодом. Введи email и пароль, чтобы получить новый код.",
+      );
     if (emailAction) window.history.replaceState({}, "", location.pathname);
   }, []);
   const changeMode = (next) => {
@@ -63,6 +78,7 @@ export default function AuthScreen({ initialError = "" }) {
     setNotice("");
     setError("");
     setVisible(false);
+    setCode("");
     window.history.replaceState({}, "", location.pathname);
   };
   async function submit(event) {
@@ -83,27 +99,33 @@ export default function AuthScreen({ initialError = "" }) {
         login: "login",
         register: "register",
         reset: "reset",
-        confirm: "resend",
-        verify: "verify",
+        confirm: "verify",
         update: "update-password",
       };
-      await api("/api/auth/" + routes[mode], {
+      const result = await api("/api/auth/" + routes[mode], {
         email,
         password,
+        ...(mode === "confirm" ? { code } : {}),
         ...(mode === "register" ? { name: form.get("name") } : {}),
-        ...(["verify", "update"].includes(mode)
-          ? { token: emailAction?.token || "" }
-          : {}),
+        ...(mode === "update" ? { token: emailAction?.token || "" } : {}),
       });
-      if (mode === "login") {
-        window.history.replaceState({}, "", location.pathname + "#dashboard");
-        await reloadSession();
-      } else if (mode === "register" || mode === "confirm") {
+      if (result.verificationRequired) {
         setMode("confirm");
+        setEmail(result.email || email);
+        setCode("");
         setNotice(
-          "Если аккаунту требуется подтверждение, письмо отправлено. Проверь входящие и спам.",
+          result.emailSent
+            ? "Код отправлен. Проверь входящие и спам."
+            : "Код не отправлен. Запроси его ещё раз.",
         );
-        setCooldown(60);
+        if (result.emailError)
+          setError(authError(new Error(result.emailError)));
+        setCooldown(
+          result.emailSent || result.emailError === "rate_limit" ? 60 : 0,
+        );
+      } else if (mode === "login" || mode === "confirm") {
+        completeSignIn(result.user);
+        window.history.replaceState({}, "", location.pathname + "#dashboard");
       } else if (mode === "reset") {
         setNotice(
           "Если для этого email есть аккаунт с паролем, мы отправили ссылку для восстановления. Проверь входящие и спам.",
@@ -111,22 +133,26 @@ export default function AuthScreen({ initialError = "" }) {
         setCooldown(60);
       } else {
         setMode("done");
-        setNotice(
-          mode === "verify"
-            ? "Почта подтверждена. Теперь можно войти в аккаунт."
-            : "Пароль изменён. Войди с новым паролем.",
-        );
+        setNotice("Пароль изменён. Войди с новым паролем.");
       }
     } catch (err) {
       setError(authError(err));
-      if (
-        err.message === "email_not_confirmed" ||
-        (mode === "register" &&
-          ["email_unavailable", "email_configuration_error"].includes(
-            err.message,
-          ))
-      )
-        setMode("confirm");
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function resendCode() {
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      await api("/api/auth/resend", {});
+      setCode("");
+      setCooldown(60);
+      setNotice("Новый код отправлен. Используй код из последнего письма.");
+    } catch (err) {
+      setError(authError(err));
+      if (err.message === "rate_limit") setCooldown(60);
     } finally {
       setBusy(false);
     }
@@ -135,24 +161,21 @@ export default function AuthScreen({ initialError = "" }) {
     login: "С возвращением.",
     register: "Твой первый шаг.",
     reset: "Забыл пароль?",
-    confirm: "Проверь почту.",
-    verify: "Подтверди почту.",
+    confirm: "Введи код из письма.",
     update: "Новый пароль.",
     done: "Готово.",
   };
   const subtitles = {
     reset: "Отправим ссылку для восстановления доступа.",
-    confirm: "Открой ссылку из письма. Она действует 24 часа.",
-    verify: "Введи пароль, который ты указал при регистрации.",
-    update: "Придумай новый пароль — от 10 символов.",
+    confirm: `Код для ${email} действует 10 минут. После подтверждения ты сразу войдёшь в аккаунт.`,
+    update: "Придумай новый пароль — от 8 символов.",
     done: "Продолжай свой путь к цели.",
     login: "Войди, чтобы продолжить свой путь к цели.",
     register: "Создай аккаунт. Твоя история начинается с тебя.",
   };
   const allowed =
     config.configured &&
-    (!["register", "reset", "confirm"].includes(mode) ||
-      config.passwordRegistration);
+    (!["register", "reset"].includes(mode) || config.passwordRegistration);
   return (
     <div className="auth-page">
       <section className="auth-story">
@@ -266,7 +289,7 @@ export default function AuthScreen({ initialError = "" }) {
                     />
                   </label>
                 )}
-                {!["verify", "update"].includes(mode) && (
+                {!["confirm", "update"].includes(mode) && (
                   <label className="form-field">
                     Email
                     <input
@@ -282,6 +305,35 @@ export default function AuthScreen({ initialError = "" }) {
                   </label>
                 )}
 
+                {mode === "confirm" && (
+                  <label className="form-field">
+                    Код подтверждения
+                    <input
+                      className="verification-code"
+                      aria-label="Код подтверждения"
+                      name="code"
+                      type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
+                      autoFocus
+                      pattern="[0-9]{6}"
+                      minLength={6}
+                      maxLength={6}
+                      placeholder="000000"
+                      value={code}
+                      onChange={(event) =>
+                        setCode(
+                          event.target.value.replace(/[^0-9]/g, "").slice(0, 6),
+                        )
+                      }
+                      required
+                      aria-describedby="code-help"
+                    />
+                    <small id="code-help">
+                      Введи все 6 цифр, включая ноль в начале.
+                    </small>
+                  </label>
+                )}
                 {!["reset", "confirm"].includes(mode) && (
                   <label className="form-field">
                     <span className="password-label">Пароль</span>
@@ -298,9 +350,9 @@ export default function AuthScreen({ initialError = "" }) {
                         placeholder={
                           mode === "login"
                             ? "Введи пароль"
-                            : "Не менее 10 символов"
+                            : "Не менее 8 символов"
                         }
-                        minLength={mode === "login" ? 1 : 10}
+                        minLength={mode === "login" ? 1 : 8}
                         maxLength={128}
                         required
                       />
@@ -326,7 +378,7 @@ export default function AuthScreen({ initialError = "" }) {
                       type={visible ? "text" : "password"}
                       autoComplete="new-password"
                       placeholder="Ещё раз, чтобы не ошибиться"
-                      minLength={10}
+                      minLength={8}
                       maxLength={128}
                       required
                     />
@@ -336,7 +388,8 @@ export default function AuthScreen({ initialError = "" }) {
                   className="primary-button auth-submit"
                   disabled={
                     !allowed ||
-                    (["reset", "confirm"].includes(mode) && cooldown > 0)
+                    (mode === "reset" && cooldown > 0) ||
+                    (mode === "confirm" && code.length !== 6)
                   }
                   type="submit"
                 >
@@ -348,20 +401,28 @@ export default function AuthScreen({ initialError = "" }) {
                       login: "Войти",
                       register: "Создать аккаунт",
                       reset: "Отправить ссылку",
-                      confirm: "Отправить письмо ещё раз",
-                      verify: "Подтвердить почту",
+                      confirm: "Подтвердить и войти",
                       update: "Сохранить пароль",
                     }[mode]
                   }
-                  {["reset", "confirm"].includes(mode) &&
-                    cooldown > 0 &&
-                    ` (${cooldown} с)`}
+                  {mode === "reset" && cooldown > 0 && ` (${cooldown} с)`}
                   {!busy && <ArrowRight size={18} />}
                 </button>
               </fieldset>
             </form>
           )}
-          {["login", "verify", "confirm"].includes(mode) && (
+          {mode === "confirm" && (
+            <p className="auth-switch">
+              <button
+                type="button"
+                disabled={busy || cooldown > 0 || !config.passwordRegistration}
+                onClick={resendCode}
+              >
+                Отправить код ещё раз{cooldown > 0 ? ` (${cooldown} с)` : ""}
+              </button>
+            </p>
+          )}
+          {mode === "login" && (
             <p className="auth-switch">
               <button disabled={busy} onClick={() => changeMode("reset")}>
                 Не помню пароль

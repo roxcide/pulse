@@ -109,7 +109,7 @@ export function emailValue(value) {
   return value.trim().toLowerCase();
 }
 export function checkPassword(value) {
-  if (typeof value !== "string" || value.length < 10 || value.length > 128)
+  if (typeof value !== "string" || value.length < 8 || value.length > 128)
     fail(400, "invalid_password");
 }
 export async function limit(env, bucket, maximum = 10, seconds = 900) {

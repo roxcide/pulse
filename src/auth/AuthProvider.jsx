@@ -30,6 +30,7 @@ export function AuthProvider({ children }) {
     setEmailAction(null);
     window.history.replaceState({}, "", location.pathname);
   }
+  const [pendingVerification, setPendingVerification] = useState(null);
   const [isGuest, setGuest] = useState(readGuestMode);
   const [user, setUser] = useState(null),
     [loading, setLoading] = useState(true),
@@ -42,12 +43,23 @@ export function AuthProvider({ children }) {
   async function reloadSession() {
     const result = await api("/api/auth/session");
     setUser(result.user);
+    setPendingVerification(result.verification || null);
+    if (result.user) setEmailAction(null);
     if (result.user) {
       setGuest(false);
       try {
         localStorage.removeItem(guestKey);
       } catch {}
     }
+  }
+  function completeSignIn(account) {
+    setUser(account);
+    setGuest(false);
+    setPendingVerification(null);
+    setEmailAction(null);
+    try {
+      localStorage.removeItem(guestKey);
+    } catch {}
   }
   function enterGuest() {
     setEmailAction(null);
@@ -83,8 +95,10 @@ export function AuthProvider({ children }) {
         if (alive) {
           if (settings.status === "fulfilled") setConfig(settings.value);
           else setError(authError(settings.reason));
-          if (session.status === "fulfilled") setUser(session.value.user);
-          else setError(authError(session.reason));
+          if (session.status === "fulfilled") {
+            setUser(session.value.user);
+            setPendingVerification(session.value.verification || null);
+          } else setError(authError(session.reason));
         }
       })
       .catch((err) => {
@@ -103,12 +117,14 @@ export function AuthProvider({ children }) {
         user: isGuest ? guestUser : user,
         isGuest,
         emailAction,
+        pendingVerification,
         finishEmailAction,
         enterGuest,
         loading,
         config,
         error,
         reloadSession,
+        completeSignIn,
         logout,
       }}
     >

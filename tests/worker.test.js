@@ -60,6 +60,11 @@ function database() {
   };
 }
 let env, signingKey, jwk, mails;
+const mailCode = () => mails.at(-1).textContent.match(/Код: (\d{6})/)[1];
+const expireMailLimit = (email = "one@example.com") =>
+  env.DB.raw
+    .prepare("UPDATE rate_limits SET expires_at = 0 WHERE bucket = ?")
+    .run(createHash("sha256").update(`mail:${email}`).digest("hex"));
 const mailToken = () => mails.at(-1).textContent.match(/#token=([\w-]+)/)[1];
 beforeAll(async () => {
   const keys = await generateKeyPair("RS256");
@@ -132,49 +137,57 @@ async function register(email = "one@example.com") {
   return call("/api/auth/register", { email, password, name: "Анна" });
 }
 async function account(email = "one@example.com") {
-  await register(email);
-  expect(
-    (await call("/api/auth/verify", { token: mailToken(), password })).status,
-  ).toBe(200);
-  const response = await call("/api/auth/login", { email, password });
+  const registration = await register(email);
+  const response = await call(
+    "/api/auth/verify",
+    { code: mailCode() },
+    { cookie: registration.headers.get("set-cookie") },
+  );
   expect(response.status).toBe(200);
+  expireMailLimit(email);
   return response.headers.get("set-cookie").split(";")[0];
 }
 
 describe("Cloudflare account API", () => {
-  it("registers pending, verifies ownership and only then allows login", async () => {
+  it("confirms six digits and creates a secure session without a second login", async () => {
     const response = await register();
+    const cookie = response.headers.get("set-cookie");
     expect(response.status).toBe(201);
-    expect(response.headers.get("set-cookie")).toBeNull();
+    expect(cookie).toContain("__Host-pulse_verification");
+    expect(cookie).not.toContain("pulse_session");
     const row = env.DB.raw.prepare("SELECT * FROM users").get();
-    expect(row.password_hash).toMatch(/^scrypt-v1:/);
     expect(row.email_verified).toBe(0);
-    const token = mailToken();
+    const code = mailCode();
+    expect(code).toMatch(/^\d{6}$/);
+    expect(mails.at(-1).textContent).not.toContain("#token=");
     expect(
-      env.DB.raw.prepare("SELECT token_hash FROM email_tokens").get()
-        .token_hash,
-    ).not.toBe(token);
+      env.DB.raw
+        .prepare("SELECT token_hash FROM email_tokens WHERE kind='verify_code'")
+        .get().token_hash,
+    ).not.toBe(code);
+    expect((await call("/api/state", undefined, { cookie })).status).toBe(401);
+    expect((await call("/api/auth/verify", { code })).status).toBe(400);
     expect(
-      (await call("/api/auth/login", { email: row.email, password })).status,
-    ).toBe(403);
-    expect(
-      (await call("/api/auth/verify", { token, password: "wrong-password" }))
-        .status,
-    ).toBe(401);
-    expect((await call("/api/auth/verify", { token, password })).status).toBe(
-      200,
-    );
-    expect((await call("/api/auth/verify", { token, password })).status).toBe(
-      400,
-    );
-    const login = await call("/api/auth/login", { email: row.email, password });
-    expect(login.headers.get("set-cookie")).toMatch(
+      (
+        await call(
+          "/api/auth/verify",
+          { code: code === "000000" ? "111111" : "000000" },
+          { cookie },
+        )
+      ).status,
+    ).toBe(400);
+    const verified = await call("/api/auth/verify", { code }, { cookie });
+    expect(verified.status).toBe(200);
+    expect(verified.headers.get("set-cookie")).toMatch(
       /__Host-pulse_session=.*HttpOnly; SameSite=Lax; Max-Age=604800; Secure/,
+    );
+    expect((await call("/api/auth/verify", { code }, { cookie })).status).toBe(
+      400,
     );
     expect(
       await (
         await call("/api/state", undefined, {
-          cookie: login.headers.get("set-cookie"),
+          cookie: verified.headers.get("set-cookie"),
         })
       ).json(),
     ).toEqual({ state: {} });
@@ -321,36 +334,93 @@ describe("Cloudflare account API", () => {
       env.DB.raw.prepare("SELECT count(*) AS n FROM fitness_state").get().n,
     ).toBe(1);
   });
-  it("requires existing unverified accounts to confirm their mailbox", async () => {
-    await register();
+  it("resends codes, replaces old codes and restores pending verification after reload", async () => {
+    const registration = await register(),
+      cookie = registration.headers.get("set-cookie"),
+      oldCode = mailCode();
     expect(
-      (await call("/api/auth/login", { email: "one@example.com", password }))
-        .status,
-    ).toBe(403);
+      (await (await call("/api/auth/session", undefined, { cookie })).json())
+        .verification.email,
+    ).toBe("one@example.com");
+    expect((await call("/api/auth/resend", {}, { cookie })).status).toBe(429);
+    expireMailLimit();
+    expect((await call("/api/auth/resend", {}, { cookie })).status).toBe(200);
+    const code = mailCode();
     expect(
-      (await call("/api/auth/resend", { email: "one@example.com" })).status,
-    ).toBe(200);
-    expect(mails).toHaveLength(2);
-    expect(
-      (await call("/api/auth/resend", { email: "one@example.com" })).status,
-    ).toBe(429);
-    expect(
-      (await call("/api/auth/verify", { token: mailToken(), password })).status,
-    ).toBe(200);
-  });
-  it("rejects expired tokens, wrong token purposes and GET consumption", async () => {
-    await register();
-    const token = mailToken();
-    expect(
-      (await call("/api/auth/update-password", { token, password })).status,
-    ).toBe(400);
-    expect((await call("/api/auth/verify?token=" + token)).status).toBe(404);
-    env.DB.raw.exec("UPDATE email_tokens SET expires_at = 0");
-    expect((await call("/api/auth/verify", { token, password })).status).toBe(
-      400,
+      env.DB.raw
+        .prepare(
+          "SELECT count(*) AS n FROM email_tokens WHERE kind='verify_code'",
+        )
+        .get().n,
+    ).toBe(1);
+    if (code !== oldCode)
+      expect(
+        (await call("/api/auth/verify", { code: oldCode }, { cookie })).status,
+      ).toBe(400);
+    expect((await call("/api/auth/verify", { code }, { cookie })).status).toBe(
+      200,
     );
   });
-  it("keeps delivery failures recoverable without leaking transport details", async () => {
+  it("requires the original password to resume verification in another browser", async () => {
+    await register();
+    expireMailLimit();
+    expect(
+      (
+        await call("/api/auth/login", {
+          email: "one@example.com",
+          password: "wrong",
+        })
+      ).status,
+    ).toBe(401);
+    const login = await call("/api/auth/login", {
+      email: "one@example.com",
+      password,
+    });
+    expect((await login.json()).verificationRequired).toBe(true);
+    expect(
+      (
+        await call(
+          "/api/auth/verify",
+          { code: mailCode() },
+          { cookie: login.headers.get("set-cookie") },
+        )
+      ).status,
+    ).toBe(200);
+  });
+  it("rejects expired codes and blocks guessing across browsers and resends", async () => {
+    const registration = await register(),
+      cookie = registration.headers.get("set-cookie"),
+      code = mailCode();
+    env.DB.raw.exec(
+      "UPDATE email_tokens SET expires_at=0 WHERE kind='verify_code'",
+    );
+    expect((await call("/api/auth/verify", { code }, { cookie })).status).toBe(
+      400,
+    );
+    for (let i = 0; i < 4; i++)
+      expect(
+        (await call("/api/auth/verify", { code: "123456" }, { cookie })).status,
+      ).toBe(400);
+    expireMailLimit();
+    const login = await call("/api/auth/login", {
+      email: "one@example.com",
+      password,
+    });
+    expect(
+      (
+        await call(
+          "/api/auth/verify",
+          { code: mailCode() },
+          { cookie: login.headers.get("set-cookie") },
+        )
+      ).status,
+    ).toBe(429);
+    expect(
+      env.DB.raw.prepare("SELECT email_verified FROM users").get()
+        .email_verified,
+    ).toBe(0);
+  });
+  it("keeps mail failures recoverable with a pending browser session", async () => {
     const original = fetch;
     vi.stubGlobal(
       "fetch",
@@ -358,16 +428,69 @@ describe("Cloudflare account API", () => {
         Response.json({ secret: "must-not-leak" }, { status: 401 }),
       ),
     );
-    const response = await register();
-    expect(response.status).toBe(503);
-    expect((await response.json()).error).toBe("email_configuration_error");
+    const response = await register(),
+      cookie = response.headers.get("set-cookie");
+    expect(response.status).toBe(201);
+    expect((await response.json()).emailError).toBe(
+      "email_configuration_error",
+    );
     expect(
-      env.DB.raw.prepare("SELECT count(*) AS n FROM email_tokens").get().n,
+      env.DB.raw
+        .prepare(
+          "SELECT count(*) AS n FROM email_tokens WHERE kind='verify_code'",
+        )
+        .get().n,
     ).toBe(0);
     vi.stubGlobal("fetch", original);
-    await call("/api/auth/resend", { email: "one@example.com" });
+    expireMailLimit();
+    await call("/api/auth/resend", {}, { cookie });
     expect(
-      (await call("/api/auth/verify", { token: mailToken(), password })).status,
+      (await call("/api/auth/verify", { code: mailCode() }, { cookie })).status,
+    ).toBe(200);
+  });
+  it("accepts eight-character passwords for signup and reset, rejecting seven", async () => {
+    expect(
+      (
+        await call("/api/auth/register", {
+          email: "eight@example.com",
+          name: "Анна",
+          password: "1234567",
+        })
+      ).status,
+    ).toBe(400);
+    const registration = await call("/api/auth/register", {
+      email: "eight@example.com",
+      name: "Анна",
+      password: "12345678",
+    });
+    expect(registration.status).toBe(201);
+    expect(
+      (
+        await call(
+          "/api/auth/verify",
+          { code: mailCode() },
+          { cookie: registration.headers.get("set-cookie") },
+        )
+      ).status,
+    ).toBe(200);
+    expireMailLimit("eight@example.com");
+    await call("/api/auth/reset", { email: "eight@example.com" });
+    const token = mailToken();
+    expect(
+      (await call("/api/auth/update-password", { token, password: "7654321" }))
+        .status,
+    ).toBe(400);
+    expect(
+      (await call("/api/auth/update-password", { token, password: "87654321" }))
+        .status,
+    ).toBe(200);
+    expect(
+      (
+        await call("/api/auth/login", {
+          email: "eight@example.com",
+          password: "87654321",
+        })
+      ).status,
     ).toBe(200);
   });
   it("does not reveal account existence in reset responses or add passwords to Google accounts", async () => {
