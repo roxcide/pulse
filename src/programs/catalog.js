@@ -16,7 +16,7 @@ export const pplPrograms = [
     eyebrow: "ЖИМОВОЙ ДЕНЬ",
     desc: "Грудь, плечи и трицепс.",
     time: 55,
-    image: "/images/strength.jpg",
+    image: "/images/push.jpg",
     exercises: ["bench", "shoulder", "incline", "raise", "triceps"],
     prescription: {
       bench: { sets: 3, reps: 8, maxReps: 12 },
@@ -33,7 +33,7 @@ export const pplPrograms = [
     eyebrow: "ТЯГОВОЙ ДЕНЬ",
     desc: "Спина, задняя дельта и бицепс.",
     time: 55,
-    image: "/images/hero.jpg",
+    image: "/images/pull.jpg",
     exercises: ["pulldown", "row", "seatedrow", "reardelt", "curl"],
     prescription: {
       pulldown: { sets: 3, reps: 8, maxReps: 12 },
@@ -50,7 +50,7 @@ export const pplPrograms = [
     eyebrow: "ОПОРА ТВОЕЙ СИЛЫ",
     desc: "Бёдра, ягодицы и икры.",
     time: 60,
-    image: "/images/fullbody.jpg",
+    image: "/images/legs.jpg",
     exercises: ["squat", "romanian", "legpress", "legcurl", "calfraise"],
     prescription: {
       squat: { sets: 3, reps: 8, maxReps: 12 },

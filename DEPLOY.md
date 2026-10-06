@@ -6,7 +6,7 @@
 
 ## 1. Подготовить репозиторий
 
-Загрузи содержимое `release/pulse-ppl.zip` в корень GitHub-репозитория (не сам ZIP). Сохрани скрытые файлы `.github`, `.gitignore`, `.node-version`, `.dev.vars.example`. Не загружай `node_modules`, `.wrangler`, `.dev.vars`, `dist` или `release`.
+Загрузи содержимое `release/pulse-ppl-photos.zip` в корень GitHub-репозитория (не сам ZIP). Сохрани скрытые файлы `.github`, `.gitignore`, `.node-version`, `.dev.vars.example`. Не загружай `node_modules`, `.wrangler`, `.dev.vars`, `dist` или `release`.
 
 Если обновляешь старую версию, удали из репозитория прежние `.env.example` и `src/auth/config.js`: они относились к Supabase. Остальные файлы замени версиями из архива, включая `pnpm-lock.yaml`, `wrangler.jsonc`, `server`, `scripts` и `migrations`.
 
